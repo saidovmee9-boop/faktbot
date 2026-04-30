@@ -1,227 +1,32 @@
-# import logging 
-
-
-# from aiogram import Bot, Dispatcher, executor, types
-
-# API_TOKEN = '8694174995:AAEG2ds6QFw32K65P_HHX0vMlfJLwBWZ-GM'
-
-
-
-# logging.basicConfig(level=logging.INFO)
-
-
-# bot = Bot(token=API_TOKEN)
-# dp = Dispatcher(bot)
-
-
-
-# @dp.message_handler(commands=['start', 'help'])
-# async def send_welcome(message: types.Message):
-
-
-#     await message.reply("Fakt Botga Xush kelibsiz")
-
-
-# @dp.message_handler()
-# async def echo(message: types.Message):    
-
-
-#      await message.reply(message.text)
-
-
-
-# if __name__ == '__main__':
-#     executor.start_polling(dp, skip_updates=True)
-
-
-
-
-# import logging
-# import random
-
-# from aiogram import Bot, Dispatcher, executor, types
-
-# API_TOKEN = "8694174995:AAEG2ds6QFw32K65P_HHX0vMlfJLwBWZ-GM"
-
-# logging.basicConfig(level=logging.INFO)
-
-# bot = Bot(token=API_TOKEN)
-# dp = Dispatcher(bot)
-
-# # 📚 faktlar (ingliz + tarjima)
-# facts = [
-#     ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
-#     ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi"),
-#     ("Humans use 10% of brain is a myth", "Odam miyasi 10% ishlatadi degan gap noto‘g‘ri"),
-# ]
-
-# # 🟢 Start
-# @dp.message_handler(commands=['start'])
-# async def start(message: types.Message):
-#     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-#     markup.add("📚 Faktlar")
-    
-#     await message.answer("Salom! Fakt botga xush kelibsiz", reply_markup=markup)
-
-# # 📚 knopka bosilganda
-# @dp.message_handler(lambda message: message.text == "📚 Faktlar")
-# async def send_fact(message: types.Message):
-#     fact_en, fact_uz = random.choice(facts)
-
-#     await message.answer(
-#         f"📌 Fact:\n{fact_en}\n\n🇺🇿 Tarjima:\n{fact_uz}"
-#     )
-
-# # 🔁 boshqa xabarlar
-# @dp.message_handler()
-# async def echo(message: types.Message):
-#     await message.answer("📚 'Faktlar' tugmasini bosing")
-
-# # 🚀 ishga tushirish
-# if __name__ == '__main__':
-#     executor.start_polling(dp, skip_updates=True)
-
-
-# import logging
-
-# from aiogram import Bot, Dispatcher, executor, types
-
-# API_TOKEN = "8694174995:AAEG2ds6QFw32K65P_HHX0vMlfJLwBWZ-GM"
-
-# logging.basicConfig(level=logging.INFO)
-
-# bot = Bot(token=API_TOKEN)
-# dp = Dispatcher(bot)
-
-# # 📚 2 ta bo‘lim
-# FACTS = {
-#     "science": [
-#         ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
-#         ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi"),
-#         ("Humans have 206 bones", "Inson tanasida 206 ta suyak bor"),
-#     ],
-#     "history": [
-#         ("WW2 ended in 1945", "Ikkinchi jahon urushi 1945 da tugagan"),
-#         ("Rome founded in 753 BC", "Rim miloddan avval 753 yilda tashkil topgan"),
-#         ("Columbus discovered America", "Kolumb Amerikani kashf qilgan"),
-#     ]
-# }
-
-# # 👤 user state
-# user_data = {}
-
-# # 🟢 START
-# @dp.message_handler(commands=['start'])
-# async def start(message: types.Message):
-#     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-#     kb.add("📚 Science", "📜 History")
-
-#     await message.answer("Kategoriya tanlang:", reply_markup=kb)
-
-
-# # 📂 kategoriya
-# @dp.message_handler(lambda m: m.text in ["📚 Science", "📜 History"])
-# async def category(message: types.Message):
-
-#     cat_map = {
-#         "📚 Science": "science",
-#         "📜 History": "history"
-#     }
-
-#     cat = cat_map[message.text]
-
-#     user_data[message.from_user.id] = {
-#         "cat": cat,
-#         "index": 0
-#     }
-
-#     await send_fact(message, cat, 0)
-
-
-# # 📤 fakt yuborish
-# async def send_fact(message, cat, index):
-
-#     fact_en, fact_uz = FACTS[cat][index]
-
-#     kb = types.InlineKeyboardMarkup()
-
-#     # ❗ Prev faqat 1 dan katta bo‘lsa chiqadi
-#     buttons = []
-
-#     if index > 0:
-#         buttons.append(types.InlineKeyboardButton("⬅️ Prev", callback_data="prev"))
-
-#     if index < len(FACTS[cat]) - 1:
-#         buttons.append(types.InlineKeyboardButton("➡️ Next", callback_data="next"))
-
-#     kb.add(*buttons)
-
-#     await message.answer(
-#         f"📌 FACT:\n{fact_en}\n\n🇺🇿 TARJIMA:\n{fact_uz}",
-#         reply_markup=kb
-#     )
-
-
-# # 🔘 NEXT / PREV
-# @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
-# async def nav(call: types.CallbackQuery):
-
-#     user_id = call.from_user.id
-
-#     if user_id not in user_data:
-#         return
-
-#     data = user_data[user_id]
-#     cat = data["cat"]
-#     index = data["index"]
-
-#     if call.data == "next":
-#         index += 1
-#     else:
-#         index -= 1
-
-#     # limit
-#     if index < 0:
-#         index = 0
-#     if index >= len(FACTS[cat]):
-#         index = len(FACTS[cat]) - 1
-
-#     user_data[user_id]["index"] = index
-
-#     fact_en, fact_uz = FACTS[cat][index]
-
-#     kb = types.InlineKeyboardMarkup()
-
-#     buttons = []
-
-#     # 🔥 shu yerda ham logic
-#     if index > 0:
-#         buttons.append(types.InlineKeyboardButton("⬅️ Prev", callback_data="prev"))
-
-#     if index < len(FACTS[cat]) - 1:
-#         buttons.append(types.InlineKeyboardButton("➡️ Next", callback_data="next"))
-
-#     kb.add(*buttons)
-
-#     await call.message.edit_text(
-#         f"📌 FACT:\n{fact_en}\n\n🇺🇿 TARJIMA:\n{fact_uz}",
-#         reply_markup=kb
-#     )
-
-#     await call.answer()
-
-
-# # 🚀 RUN
-# if __name__ == '__main__':
-#     executor.start_polling(dp, skip_updates=True)
-
-
-
 import logging
 import os
 import random
 import sqlite3
 import asyncio
+from dotenv import load_dotenv
+load_dotenv()
+
+
+from flask import Flask
+from threading import Thread
+import os
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+def run():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+
+
 
 from aiogram import Bot, Dispatcher, executor, types
 
@@ -446,5 +251,7 @@ async def on_startup(dp):
     asyncio.create_task(scheduler())
 
 # 🚀 RUN
-if __name__ == '__main__':
+if __name__ == "__main__":
+    keep_alive()  # Avval serverni yoqamiz
+    # Botni ishga tushirish (faqat bitta bo'lishi kerak):
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
