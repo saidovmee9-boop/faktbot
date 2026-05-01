@@ -8,21 +8,18 @@ from aiogram import Bot, Dispatcher, executor, types
 from dotenv import load_dotenv
 from aiohttp import web
 
-
 load_dotenv()
 API_TOKEN = os.getenv("BOT_TOKEN")
 
 if not API_TOKEN:
     raise ValueError("BOT_TOKEN topilmadi!")
 
-
 logging.basicConfig(level=logging.INFO)
-
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-
+# DATABASE
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -42,7 +39,6 @@ CREATE TABLE IF NOT EXISTS saved (
 
 conn.commit()
 
-
 FACTS = {
     "science": [
         ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
@@ -58,7 +54,7 @@ FACTS = {
 
 user_data = {}
 
-
+# START
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
     user_id = message.from_user.id
@@ -73,9 +69,9 @@ async def start(message: types.Message):
     await message.answer("📌 Kategoriya tanlang:", reply_markup=kb)
 
 
+# CATEGORY
 @dp.message_handler(lambda m: m.text in ["📚 Science", "📜 History", "💻 Tech"])
 async def category(message: types.Message):
-
     cat_map = {
         "📚 Science": "science",
         "📜 History": "history",
@@ -92,7 +88,6 @@ async def send_fact(message, cat, index):
     fact_en, fact_uz = FACTS[cat][index]
 
     kb = types.InlineKeyboardMarkup(row_width=3)
-
     buttons = []
 
     if index > 0:
@@ -101,7 +96,6 @@ async def send_fact(message, cat, index):
         buttons.append(types.InlineKeyboardButton("➡️", callback_data="next"))
 
     buttons.append(types.InlineKeyboardButton("❤️ Save", callback_data=f"save|{cat}|{index}"))
-
     kb.add(*buttons)
 
     cursor.execute("UPDATE users SET views = views + 1 WHERE user_id=?", (message.from_user.id,))
@@ -111,11 +105,11 @@ async def send_fact(message, cat, index):
         f"📌 FACT\n\n🌍 {fact_en}\n\n🇺🇿 {fact_uz}",
         reply_markup=kb
     )
- 
 
+
+# NAVIGATION
 @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
 async def nav(call: types.CallbackQuery):
-
     user_id = call.from_user.id
 
     if user_id not in user_data:
@@ -134,13 +128,13 @@ async def nav(call: types.CallbackQuery):
     await call.answer()
 
 
+# SAVE
 @dp.callback_query_handler(lambda c: c.data.startswith("save"))
 async def save(call: types.CallbackQuery):
-
     _, cat, idx = call.data.split("|")
     idx = int(idx)
 
-    fact_en, fact_uz = FACTS[cat][idx]
+    fact_en, _ = FACTS[cat][idx]
 
     cursor.execute(
         "INSERT INTO saved VALUES (?, ?)",
@@ -151,7 +145,7 @@ async def save(call: types.CallbackQuery):
     await call.answer("❤️ Saqlandi!")
 
 
-
+# RANDOM
 @dp.message_handler(lambda m: m.text == "🎲 Random")
 async def random_fact(message: types.Message):
     cat = random.choice(list(FACTS.keys()))
@@ -160,10 +154,9 @@ async def random_fact(message: types.Message):
     await message.answer(f"🎲 RANDOM\n\n🌍 {fact[0]}\n\n🇺🇿 {fact[1]}")
 
 
-
+# SAVED
 @dp.message_handler(lambda m: m.text == "❤️ Saved")
 async def saved(message: types.Message):
-
     cursor.execute("SELECT fact FROM saved WHERE user_id=?", (message.from_user.id,))
     data = cursor.fetchall()
 
@@ -174,9 +167,9 @@ async def saved(message: types.Message):
         await message.answer(f"❤️ {f[0]}")
 
 
+# STATS
 @dp.message_handler(lambda m: m.text == "📊 Stats")
 async def stats(message: types.Message):
-
     cursor.execute("SELECT views FROM users WHERE user_id=?", (message.from_user.id,))
     row = cursor.fetchone()
 
@@ -185,11 +178,11 @@ async def stats(message: types.Message):
     await message.answer(f"📊 Siz {views} ta fakt ko‘rgansiz")
 
 
-
+# WEB SERVER (Render uchun)
 async def handle(request):
     return web.Response(text="Bot is running!")
 
-async def start_webserver():
+async def on_startup(dp):
     app = web.Application()
     app.router.add_get("/", handle)
 
@@ -198,20 +191,11 @@ async def start_webserver():
 
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
-
     await site.start()
+
     print("Web server started")
 
 
-
-async def on_startup(dp):
-    asyncio.create_task(start_webserver())
-
-
-
+# START
 if __name__ == "__main__":
-    executor.start_polling(
-        dp,
-        skip_updates=True,
-        on_startup=on_startup
-    )
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
