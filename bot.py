@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS saved (
     user_id INTEGER,
-    fact TEXT
+    fact TEXT,
+    PRIMARY KEY(user_id, fact)
 )
 """)
 
@@ -107,7 +108,7 @@ async def send_fact(message, cat, index):
     )
 
 
-# NAVIGATION
+# NAVIGATION (FIX QILINMADI — SEND_FACT ishlayapti)
 @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
 async def nav(call: types.CallbackQuery):
     user_id = call.from_user.id
@@ -137,7 +138,7 @@ async def save(call: types.CallbackQuery):
     fact_en, _ = FACTS[cat][idx]
 
     cursor.execute(
-        "INSERT INTO saved VALUES (?, ?)",
+        "INSERT OR IGNORE INTO saved VALUES (?, ?)",
         (call.from_user.id, fact_en)
     )
     conn.commit()
@@ -178,11 +179,18 @@ async def stats(message: types.Message):
     await message.answer(f"📊 Siz {views} ta fakt ko‘rgansiz")
 
 
-# WEB SERVER (Render uchun)
+# =========================
+# 🌐 RENDER WEB SERVER FIX
+# =========================
+
+runner = None
+
 async def handle(request):
     return web.Response(text="Bot is running!")
 
 async def on_startup(dp):
+    global runner
+
     app = web.Application()
     app.router.add_get("/", handle)
 
@@ -193,9 +201,20 @@ async def on_startup(dp):
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    print("Web server started")
+    print("Web server started on port", port)
 
 
-# START
+async def on_shutdown(dp):
+    global runner
+    if runner:
+        await runner.cleanup()
+
+
+# START BOT
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(
+        dp,
+        skip_updates=True,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown
+    )
