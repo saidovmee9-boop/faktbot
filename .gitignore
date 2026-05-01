@@ -1,5 +1,4 @@
-.env
-.venv/
 venv/
+.env
 __pycache__/
 bot.db
