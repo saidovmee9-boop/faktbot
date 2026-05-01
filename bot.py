@@ -45,14 +45,25 @@ FACTS = {
         ("Water boils at 100°C", "Suv 100°C da qaynaydi", "Вода кипит при 100°C"),
         ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi", "Земля вращается вокруг Солнца"),
         ("Humans have 206 bones", "Insonda 206 ta suyak bor", "У человека 206 костей"),
+        ("Light travels faster than sound", "Yorug‘lik tovushdan tezroq", "Свет быстрее звука"),
+        ("Oxygen is essential for life", "Kislorod hayot uchun zarur", "Кислород необходим для жизни"),
+        ("Water is H2O", "Suv H2O molekulasidan iborat", "Вода состоит из H2O"),
     ],
+
     "history": [
         ("WW2 ended in 1945", "2-jahon urushi 1945 da tugagan", "Вторая мировая война закончилась в 1945"),
         ("Rome was founded in 753 BC", "Rim miloddan avval 753 yilda asos solingan", "Рим основан в 753 году до н.э."),
+        ("The Great Wall is in China", "Buyuk Xitoy devori Xitoyda", "Великая китайская стена в Китае"),
+        ("Napoleon was a French leader", "Napoleon Fransiya lideri bo‘lgan", "Наполеон был лидером Франции"),
+        ("Columbus discovered America in 1492", "Kolumb Amerikani 1492 yilda kashf etgan", "Колумб открыл Америку в 1492"),
     ],
+
     "tech": [
         ("Python is a popular language", "Python mashhur dasturlash tili", "Python — популярный язык программирования"),
         ("AI stands for Artificial Intelligence", "AI — sun'iy intellekt", "ИИ — искусственный интеллект"),
+        ("HTML is used for web pages", "HTML veb sahifa uchun ishlatiladi", "HTML используется для веб-страниц"),
+        ("CPU is the brain of computer", "CPU kompyuter miyasi", "CPU — мозг компьютера"),
+        ("Internet connects the world", "Internet dunyoni bog‘laydi", "Интернет соединяет мир"),
     ]
 }
 
