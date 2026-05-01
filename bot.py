@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher, executor, types
 from dotenv import load_dotenv
 from aiohttp import web
 
+# ================= SETUP =================
 load_dotenv()
 API_TOKEN = os.getenv("BOT_TOKEN")
 
@@ -37,73 +38,72 @@ CREATE TABLE IF NOT EXISTS saved (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS user_state (
+    user_id INTEGER PRIMARY KEY,
+    cat TEXT,
+    idx INTEGER DEFAULT 0
+)
+""")
+
 conn.commit()
 
-# ================= FACTS (EN + UZ + RU) =================
+# ================= FACTS =================
 FACTS = {
     "science": [
         ("Water boils at 100°C", "Suv 100°C da qaynaydi", "Вода кипит при 100°C"),
         ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi", "Земля вращается вокруг Солнца"),
         ("Humans have 206 bones", "Insonda 206 ta suyak bor", "У человека 206 костей"),
-        ("Light travels faster than sound", "Yorug‘lik tovushdan tezroq", "Свет быстрее звука"),
-        ("Oxygen is essential for life", "Kislorod hayot uchun zarur", "Кислород необходим для жизни"),
-        ("Water is H2O", "Suv H2O molekulasidan iborat", "Вода состоит из H2O"),
+        ("Light is faster than sound", "Yorug‘lik tovushdan tez", "Свет быстрее звука"),
     ],
-
     "history": [
         ("WW2 ended in 1945", "2-jahon urushi 1945 da tugagan", "Вторая мировая война закончилась в 1945"),
-        ("Rome was founded in 753 BC", "Rim miloddan avval 753 yilda asos solingan", "Рим основан в 753 году до н.э."),
-        ("The Great Wall is in China", "Buyuk Xitoy devori Xitoyda", "Великая китайская стена в Китае"),
-        ("Napoleon was a French leader", "Napoleon Fransiya lideri bo‘lgan", "Наполеон был лидером Франции"),
-        ("Columbus discovered America in 1492", "Kolumb Amerikani 1492 yilda kashf etgan", "Колумб открыл Америку в 1492"),
+        ("Rome was founded in 753 BC", "Rim 753 BC asos solingan", "Рим основан в 753 до н.э."),
+        ("Columbus discovered America in 1492", "Kolumb 1492 yilda Amerika", "Колумб открыл Америку в 1492"),
     ],
-
     "tech": [
-        ("Python is a popular language", "Python mashhur dasturlash tili", "Python — популярный язык программирования"),
-        ("AI stands for Artificial Intelligence", "AI — sun'iy intellekt", "ИИ — искусственный интеллект"),
-        ("HTML is used for web pages", "HTML veb sahifa uchun ishlatiladi", "HTML используется для веб-страниц"),
-        ("CPU is the brain of computer", "CPU kompyuter miyasi", "CPU — мозг компьютера"),
-        ("Internet connects the world", "Internet dunyoni bog‘laydi", "Интернет соединяет мир"),
+        ("Python is a programming language", "Python dasturlash tili", "Python язык программирования"),
+        ("AI means Artificial Intelligence", "AI sun’iy intellekt", "ИИ искусственный интеллект"),
+        ("CPU is brain of computer", "CPU kompyuter miyasi", "CPU мозг компьютера"),
     ]
 }
 
-user_data = {}
-
-# ================= AUTO USER REGISTER =================
+# ================= USER INIT =================
 async def ensure_user(user_id):
     cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (user_id,))
     conn.commit()
 
-# ================= START MENU =================
+# ================= KEYBOARD =================
 def main_kb():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📚 Science", "📜 History", "💻 Tech")
     kb.add("🎲 Random", "❤️ Saved", "📊 Stats")
     return kb
 
-# ================= ANY MESSAGE HANDLER (NO /start needed) =================
+# ================= ANY MESSAGE =================
 @dp.message_handler()
 async def any_message(message: types.Message):
     await ensure_user(message.from_user.id)
 
-    if message.text in ["📚 Science", "📜 History", "💻 Tech"]:
+    text = message.text
+
+    if text in ["📚 Science", "📜 History", "💻 Tech"]:
         await category(message)
         return
 
-    if message.text == "🎲 Random":
+    if text == "🎲 Random":
         await random_fact(message)
         return
 
-    if message.text == "❤️ Saved":
+    if text == "❤️ Saved":
         await saved(message)
         return
 
-    if message.text == "📊 Stats":
+    if text == "📊 Stats":
         await stats(message)
         return
 
     await message.answer("📌 Menyudan foydalaning:", reply_markup=main_kb())
-
 
 # ================= CATEGORY =================
 async def category(message: types.Message):
@@ -113,25 +113,38 @@ async def category(message: types.Message):
         "💻 Tech": "tech"
     }
 
+    user_id = message.from_user.id
     cat = cat_map[message.text]
-    user_data[message.from_user.id] = {"cat": cat, "index": 0}
 
-    await send_fact(message.chat.id, message.from_user.id, cat, 0)
+    cursor.execute("""
+        INSERT OR REPLACE INTO user_state (user_id, cat, idx)
+        VALUES (?, ?, 0)
+    """, (user_id, cat))
+    conn.commit()
 
+    await send_fact(message.chat.id, user_id)
 
-# ================= SEND FACT (EDIT MESSAGE = IDEAL UX) =================
-async def send_fact(chat_id, user_id, cat, index, message_id=None):
-    fact_en, fact_uz, fact_ru = FACTS[cat][index]
+# ================= SEND FACT =================
+async def send_fact(chat_id, user_id, message_id=None):
+    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+
+    if not data:
+        return
+
+    cat, idx = data
+    fact_en, fact_uz, fact_ru = FACTS[cat][idx]
 
     kb = types.InlineKeyboardMarkup(row_width=3)
-    buttons = []
 
-    if index > 0:
+    buttons = []
+    if idx > 0:
         buttons.append(types.InlineKeyboardButton("⬅️", callback_data="prev"))
-    if index < len(FACTS[cat]) - 1:
+    if idx < len(FACTS[cat]) - 1:
         buttons.append(types.InlineKeyboardButton("➡️", callback_data="next"))
 
-    buttons.append(types.InlineKeyboardButton("❤️ Save", callback_data=f"save|{cat}|{index}"))
+    buttons.append(types.InlineKeyboardButton("❤️ Save", callback_data="save"))
+
     kb.add(*buttons)
 
     cursor.execute("UPDATE users SET views = views + 1 WHERE user_id=?", (user_id,))
@@ -149,44 +162,51 @@ async def send_fact(chat_id, user_id, cat, index, message_id=None):
     else:
         await bot.send_message(chat_id, text, reply_markup=kb)
 
-
 # ================= NAVIGATION =================
 @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
 async def nav(call: types.CallbackQuery):
     user_id = call.from_user.id
 
-    if user_id not in user_data:
+    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
+    data = cursor.fetchone()
+
+    if not data:
         return await call.answer("Avval kategoriya tanlang")
 
-    data = user_data[user_id]
-    cat = data["cat"]
-    index = data["index"]
+    cat, idx = data
 
-    index += 1 if call.data == "next" else -1
-    index = max(0, min(index, len(FACTS[cat]) - 1))
+    if call.data == "next":
+        idx += 1
+    else:
+        idx -= 1
 
-    user_data[user_id]["index"] = index
+    idx = max(0, min(idx, len(FACTS[cat]) - 1))
 
-    await send_fact(call.message.chat.id, user_id, cat, index, call.message.message_id)
+    cursor.execute("""
+        UPDATE user_state SET idx=? WHERE user_id=?
+    """, (idx, user_id))
+    conn.commit()
+
+    await send_fact(call.message.chat.id, user_id, call.message.message_id)
     await call.answer()
 
-
 # ================= SAVE =================
-@dp.callback_query_handler(lambda c: c.data.startswith("save"))
+@dp.callback_query_handler(lambda c: c.data == "save")
 async def save(call: types.CallbackQuery):
-    _, cat, idx = call.data.split("|")
-    idx = int(idx)
+    user_id = call.from_user.id
 
-    fact_en, _, _ = FACTS[cat][idx]
+    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
+    cat, idx = cursor.fetchone()
+
+    fact_en = FACTS[cat][idx][0]
 
     cursor.execute(
         "INSERT OR IGNORE INTO saved VALUES (?, ?)",
-        (call.from_user.id, fact_en)
+        (user_id, fact_en)
     )
     conn.commit()
 
     await call.answer("❤️ Saqlandi!")
-
 
 # ================= RANDOM =================
 async def random_fact(message: types.Message):
@@ -196,7 +216,6 @@ async def random_fact(message: types.Message):
     await message.answer(
         f"🎲 RANDOM\n\n🇬🇧 {fact_en}\n🇺🇿 {fact_uz}\n🇷🇺 {fact_ru}"
     )
-
 
 # ================= SAVED =================
 async def saved(message: types.Message):
@@ -209,7 +228,6 @@ async def saved(message: types.Message):
     for f in data:
         await message.answer(f"❤️ {f[0]}")
 
-
 # ================= STATS =================
 async def stats(message: types.Message):
     cursor.execute("SELECT views FROM users WHERE user_id=?", (message.from_user.id,))
@@ -218,8 +236,7 @@ async def stats(message: types.Message):
     views = row[0] if row else 0
     await message.answer(f"📊 Siz {views} ta fakt ko‘rgansiz")
 
-
-# ================= WEB SERVER =================
+# ================= WEB =================
 runner = None
 
 async def handle(request):
@@ -238,15 +255,12 @@ async def on_startup(dp):
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    print("Web server started")
-
 async def on_shutdown(dp):
     global runner
     if runner:
         await runner.cleanup()
 
-
-# ================= START =================
+# ================= RUN =================
 if __name__ == "__main__":
     executor.start_polling(
         dp,
