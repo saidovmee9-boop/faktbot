@@ -272,17 +272,15 @@ async def run_web_server():
     await site.start()
 
 
+import os
+# ... boshqa importlar
+
 async def main():
-    # 1. Web serverni orqa fonda ishga tushiramiz
-    asyncio.create_task(run_web_server())
-    
-    # 2. Botni ishga tushiramiz (eskicha holatda qolaveradi)
-    # Masalan sizda shunday bo'lishi mumkin:
-    bot = Bot(token="TOKEN")
+    # Tokenni kodga yozmaymiz, Render sozlamalaridan olamiz
+    BOT_TOKEN = os.getenv("BOT_TOKEN") 
+    bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher()
-    
-    print("Bot ishga tushdi...")
-    await dp.start_polling(bot, skip_updates=True)
+    # ... qolgan qismlari
 
 if __name__ == "__main__":
     asyncio.run(main())
