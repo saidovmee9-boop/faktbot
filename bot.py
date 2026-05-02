@@ -1,28 +1,28 @@
 import os
-import logging
 import random
-import sqlite3
 import asyncio
-from datetime import datetime
-
-from aiogram import Bot, Dispatcher, executor, types
-from dotenv import load_dotenv
+import logging
 from aiohttp import web
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+import aiosqlite
 
 # ================= SETUP =================
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
+logging.basicConfig(level=logging.INFO)
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-logging.basicConfig(level=logging.INFO)
-
-# ================= WEB (RENDER) =================
+# ================= WEB =================
 app = web.Application()
 
 async def health(request):
-    return web.Response(text="Ultra Pro Bot Running 🚀")
+    return web.Response(text="Ultra Pro Quiz Bot 🚀 Running")
 
 app.router.add_get("/", health)
 
@@ -33,225 +33,251 @@ async def start_web():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-# ================= DB =================
-conn = sqlite3.connect("bot.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS lobby (
-    game_id TEXT,
-    user_id INTEGER,
-    nickname TEXT,
-    ready INTEGER DEFAULT 0,
-    score INTEGER DEFAULT 0,
-    answered INTEGER DEFAULT 0
-)
-""")
-conn.commit()
-
-# ================= GAME STATE =================
-GAME_STATE = {
-    "active": {},
-    "answered": set()
+# ================= FACT SYSTEM =================
+FACTS = {
+    "science": [
+        ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
+        ("Humans have 206 bones", "Insonda 206 ta suyak bor"),
+        ("Light is faster than sound", "Yorug‘lik tezligi tovushdan tez"),
+    ],
+    "history": [
+        ("World War II ended in 1945", "Ikkinchi jahon urushi 1945-yilda tugagan"),
+        ("Uzbekistan became independent in 1991", "O‘zbekiston 1991-yilda mustaqil bo‘lgan"),
+    ],
+    "tech": [
+        ("AI means Artificial Intelligence", "AI — sun’iy intellekt"),
+        ("Internet started development in 1983", "Internet 1983-yilda boshlangan"),
+    ]
 }
 
-# ================= FACTS =================
-FACTS = [
-    ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
-    ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi"),
-    ("Humans have 206 bones", "Insonda 206 ta suyak bor"),
-    ("Light is faster than sound", "Yorug‘lik tezligi tovushdan tez"),
-]
+CATEGORY_WEIGHTS = {
+    "science": 45,
+    "history": 30,
+    "tech": 25
+}
 
-used_questions = set()
+GAME_STATE = {}
 
-def get_unique_question():
-    for _ in range(30):
-        f = random.choice(FACTS)
-        if f[0] not in used_questions:
-            used_questions.add(f[0])
-            return f
-    return random.choice(FACTS)
+# ================= DB =================
+async def init_db():
+    async with aiosqlite.connect("bot.db") as db:
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS lobby (
+            game_id TEXT,
+            user_id INTEGER,
+            nickname TEXT,
+            ready INTEGER DEFAULT 0,
+            score INTEGER DEFAULT 0,
+            PRIMARY KEY (game_id, user_id)
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS saved_facts (
+            user_id INTEGER,
+            en TEXT,
+            uz TEXT
+        )
+        """)
+
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS stats (
+            user_id INTEGER PRIMARY KEY,
+            correct INTEGER DEFAULT 0,
+            wrong INTEGER DEFAULT 0
+        )
+        """)
+
+        await db.commit()
+
+# ================= UTIL =================
+def pick_category():
+    pool = []
+    for cat, w in CATEGORY_WEIGHTS.items():
+        pool += [cat] * w
+    return random.choice(pool)
+
+def generate_question():
+    category = pick_category()
+    fact = random.choice(FACTS[category])
+
+    correct = fact[1]
+
+    wrong = []
+    for c in FACTS:
+        for f in FACTS[c]:
+            if f[1] != correct:
+                wrong.append(f[1])
+
+    options = random.sample(wrong, min(2, len(wrong)))
+    options.append(correct)
+    random.shuffle(options)
+
+    return category, fact, correct, options
 
 # ================= KEYBOARD =================
 def main_kb():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🎮 Ultra Quiz")
+    kb.add("🎮 Start Quiz")
+    kb.add("⭐ Saved Facts")
     return kb
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    await message.answer("🔥 Ultra Pro Kahoot Bot", reply_markup=main_kb())
+    await message.answer("🔥 Ultra Quiz Bot Ready", reply_markup=main_kb())
 
-# ================= ROOM =================
-@dp.message_handler(lambda m: m.text == "🎮 Ultra Quiz")
+# ================= CREATE ROOM =================
+@dp.message_handler(lambda m: m.text == "🎮 Start Quiz")
 async def create_room(message: types.Message):
     game_id = str(random.randint(1000, 9999))
 
-    cursor.execute(
-        "INSERT INTO lobby VALUES (?, ?, ?, 0, 0, 0)",
-        (game_id, message.from_user.id, message.from_user.first_name)
-    )
-    conn.commit()
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO lobby VALUES (?, ?, ?, 0, 0)",
+            (game_id, message.from_user.id, message.from_user.first_name)
+        )
+        await db.commit()
+
+    GAME_STATE[game_id] = {"answered": set()}
 
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("⚡ JOIN / READY", callback_data=f"ready:{game_id}"))
 
-    await message.answer(
-        f"🎮 ROOM CREATED\n\nID: {game_id}\n/join {game_id}",
-        reply_markup=kb
-    )
+    await message.answer(f"🎮 ROOM CREATED\nID: {game_id}\n/join {game_id}", reply_markup=kb)
 
 # ================= JOIN =================
 @dp.message_handler(lambda m: m.text and m.text.startswith("/join"))
 async def join(message: types.Message):
-    try:
-        game_id = message.text.split()[1]
-    except:
-        return await message.answer("❌ Xato ID")
+    game_id = message.text.split()[1]
 
-    cursor.execute(
-        "INSERT INTO lobby VALUES (?, ?, ?, 0, 0, 0)",
-        (game_id, message.from_user.id, message.from_user.first_name)
-    )
-    conn.commit()
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO lobby VALUES (?, ?, ?, 0, 0)",
+            (game_id, message.from_user.id, message.from_user.first_name)
+        )
+        await db.commit()
 
     kb = types.InlineKeyboardMarkup()
     kb.add(types.InlineKeyboardButton("⚡ READY", callback_data=f"ready:{game_id}"))
 
-    await message.answer("👤 Joined!", reply_markup=kb)
+    await message.answer("👤 Joined", reply_markup=kb)
 
 # ================= READY =================
 @dp.callback_query_handler(lambda c: c.data.startswith("ready"))
 async def ready(call: types.CallbackQuery):
     _, game_id = call.data.split(":")
 
-    cursor.execute("""
-        UPDATE lobby
-        SET ready=1
-        WHERE user_id=? AND game_id=?
-    """, (call.from_user.id, game_id))
-    conn.commit()
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("""
+            UPDATE lobby SET ready=1
+            WHERE user_id=? AND game_id=?
+        """, (call.from_user.id, game_id))
+        await db.commit()
+
+        cur = await db.execute("""
+            SELECT COUNT(*) FROM lobby
+            WHERE game_id=? AND ready=0
+        """, (game_id,))
+
+        count = (await cur.fetchone())[0]
 
     await call.answer("Ready!")
 
-    cursor.execute("""
-        SELECT COUNT(*) FROM lobby
-        WHERE game_id=? AND ready=0
-    """, (game_id,))
-
-    if cursor.fetchone()[0] == 0:
+    if count == 0:
         asyncio.create_task(game_loop(game_id))
 
-# ================= QUIZ ENGINE =================
-def generate():
-    q = get_unique_question()
-    correct = q[1]
-
-    wrong = [f[1] for f in FACTS if f[1] != correct]
-
-    if len(wrong) < 2:
-        wrong = ["A", "B", "C"]
-
-    options = random.sample(wrong, 2)
-    options.append(correct)
-    random.shuffle(options)
-
-    return q, correct, options
-
-# ================= LIVE TIMER =================
-async def countdown(msg, text, seconds=5):
-    for i in range(seconds, 0, -1):
-        await msg.edit_text(f"{text}\n⏳ {i}s")
-        await asyncio.sleep(1)
+# ================= STATS =================
+async def update_stats(user_id, correct=True):
+    async with aiosqlite.connect("bot.db") as db:
+        if correct:
+            await db.execute("""
+                INSERT INTO stats(user_id, correct, wrong)
+                VALUES (?,1,0)
+                ON CONFLICT(user_id) DO UPDATE SET correct = correct + 1
+            """, (user_id,))
+        else:
+            await db.execute("""
+                INSERT INTO stats(user_id, correct, wrong)
+                VALUES (?,0,1)
+                ON CONFLICT(user_id) DO UPDATE SET wrong = wrong + 1
+            """, (user_id,))
+        await db.commit()
 
 # ================= GAME LOOP =================
 async def game_loop(game_id):
-    GAME_STATE["answered"] = set()
 
     for i in range(5):
-        q, correct, options = generate()
+
+        category, fact, correct, options = generate_question()
 
         kb = types.InlineKeyboardMarkup()
 
         for opt in options:
             kb.add(types.InlineKeyboardButton(
                 opt,
-                callback_data=f"ans:{game_id}:{opt}:{correct}"
+                callback_data=f"ans:{game_id}:{opt}:{correct}:{fact[0]}:{fact[1]}"
             ))
 
-        cursor.execute("SELECT user_id FROM lobby WHERE game_id=?", (game_id,))
-        users = cursor.fetchall()
+        async with aiosqlite.connect("bot.db") as db:
+            cur = await db.execute("SELECT user_id FROM lobby WHERE game_id=?", (game_id,))
+            users = await cur.fetchall()
 
         for u in users:
-            msg = await bot.send_message(u[0], f"🎯 QUESTION {i+1}\n\n🇬🇧 {q[0]}", reply_markup=kb)
-            await countdown(msg, "🔥 ANSWER NOW", 5)
+            await bot.send_message(
+                u[0],
+                f"🎯 {category.upper()}\n\n🇬🇧 {fact[0]}",
+                reply_markup=kb
+            )
 
         await asyncio.sleep(10)
 
-        await show_leaderboard(game_id)
-
-    await final_result(game_id)
-
-# ================= ANSWER SYSTEM =================
+# ================= ANSWER =================
 @dp.callback_query_handler(lambda c: c.data.startswith("ans"))
 async def answer(call: types.CallbackQuery):
-    try:
-        _, game_id, ans, correct = call.data.split(":")
-    except:
-        return
-
-    key = f"{call.from_user.id}:{game_id}"
-
-    if key in GAME_STATE["answered"]:
-        return await call.answer("❌ Already answered")
-
-    GAME_STATE["answered"].add(key)
+    _, game_id, ans, correct, en, uz = call.data.split(":", 5)
 
     if ans == correct:
-        cursor.execute("""
-            UPDATE lobby
-            SET score = score + 1
-            WHERE user_id=? AND game_id=?
-        """, (call.from_user.id, game_id))
-        conn.commit()
-        await call.answer("⚡ +1")
+        await update_stats(call.from_user.id, True)
+
+        # SAVE FACT AUTOMATICALLY
+        async with aiosqlite.connect("bot.db") as db:
+            await db.execute("""
+                INSERT INTO saved_facts(user_id, en, uz)
+                VALUES (?,?,?)
+            """, (call.from_user.id, en, uz))
+            await db.commit()
+
+        await call.answer("✅ +1 Saved")
     else:
-        await call.answer("❌")
+        await update_stats(call.from_user.id, False)
+        await call.answer("❌ Wrong")
 
-# ================= LIVE LEADERBOARD =================
-async def show_leaderboard(game_id):
-    cursor.execute("""
-        SELECT nickname, score
-        FROM lobby
-        WHERE game_id=?
-        ORDER BY score DESC
-    """, (game_id,))
+# ================= SAVED FACTS =================
+@dp.message_handler(lambda m: m.text == "⭐ Saved Facts")
+async def saved(message: types.Message):
+    async with aiosqlite.connect("bot.db") as db:
+        cur = await db.execute("""
+            SELECT en, uz FROM saved_facts
+            WHERE user_id=?
+        """, (message.from_user.id,))
+        rows = await cur.fetchall()
 
-    players = cursor.fetchall()
+    if not rows:
+        return await message.answer("No saved facts yet.")
 
-    text = "📊 LIVE LEADERBOARD\n\n"
+    text = "⭐ SAVED FACTS:\n\n"
+    for r in rows[-10:]:
+        text += f"🇬🇧 {r[0]}\n🇺🇿 {r[1]}\n\n"
 
-    for i, p in enumerate(players):
-        text += f"{i+1}. {p[0]} — {p[1]} pts\n"
+    await message.answer(text)
 
-    cursor.execute("SELECT user_id FROM lobby WHERE game_id=?", (game_id,))
-    users = cursor.fetchall()
-
-    for u in users:
-        try:
-            await bot.send_message(u[0], text)
-        except:
-            pass
-
-# ================= FINAL =================
-async def final_result(game_id):
-    await show_leaderboard(game_id)
-
-# ================= RUN =================
-async def on_startup(dp):
+# ================= STARTUP =================
+async def on_startup(_):
+    await init_db()
     asyncio.create_task(start_web())
 
+# ================= RUN =================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
