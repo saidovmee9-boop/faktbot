@@ -13,15 +13,15 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise Exception("BOT_TOKEN missing in Render environment")
+    raise Exception("BOT_TOKEN missing in environment")
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= DB =================
-conn = sqlite3.connect("bot.db", check_same_thread=False)
+# ================= DATABASE =================
+conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS saved (
     uz TEXT
 )
 """)
-
 conn.commit()
 
 # ================= FACTS =================
@@ -42,10 +41,10 @@ FACTS = {
         ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
     ],
     "history": [
-        ("WW2 ended 1945", "WW2 закончилась 1945", "WW2 1945 tugagan"),
+        ("WW2 ended in 1945", "WW2 закончилась 1945", "WW2 1945 tugagan"),
     ],
     "tech": [
-        ("Internet started 1983", "Интернет 1983", "Internet 1983"),
+        ("Internet started in 1983", "Интернет 1983", "Internet 1983"),
     ]
 }
 
@@ -54,7 +53,8 @@ USER_STATE = {}
 
 # ================= LOGIC =================
 def get_fact(cat):
-    pool = FACTS[cat]
+    pool = FACTS.get(cat, [])
+
     available = [f for f in pool if f[0] not in USED]
 
     if not available:
@@ -65,18 +65,19 @@ def get_fact(cat):
     USED.add(fact[0])
     return fact
 
-# ================= UI =================
+# ================= KEYBOARDS =================
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📚 Science", "🏛 History")
     kb.add("💻 Tech", "⭐ Saved")
     return kb
 
+
 def nav():
     kb = types.InlineKeyboardMarkup()
     kb.add(
-        types.InlineKeyboardButton("⬅️", callback_data="prev"),
-        types.InlineKeyboardButton("➡️", callback_data="next")
+        types.InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
+        types.InlineKeyboardButton("➡️ Next", callback_data="next")
     )
     kb.add(types.InlineKeyboardButton("⭐ Save", callback_data="save"))
     return kb
@@ -84,7 +85,7 @@ def nav():
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Fact Bot Ready", reply_markup=menu())
+    await m.answer("🚀 Fact Bot is running!", reply_markup=menu())
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
@@ -103,13 +104,13 @@ async def category(m: types.Message):
         reply_markup=nav()
     )
 
-# ================= NAV =================
+# ================= NAVIGATION =================
 @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
 async def nav_handler(c: types.CallbackQuery):
     uid = c.from_user.id
 
     if uid not in USER_STATE:
-        return await c.answer("Start first")
+        return await c.answer("Send /start first")
 
     cat = USER_STATE[uid]["cat"]
     fact = get_fact(cat)
@@ -129,7 +130,7 @@ async def save(c: types.CallbackQuery):
     uid = c.from_user.id
 
     if uid not in USER_STATE:
-        return await c.answer("No fact")
+        return await c.answer("No fact found")
 
     en, ru, uz = USER_STATE[uid]["fact"]
 
@@ -141,7 +142,7 @@ async def save(c: types.CallbackQuery):
 
     await c.answer("Saved ⭐")
 
-# ================= SAVED =================
+# ================= SAVED LIST =================
 @dp.message_handler(lambda m: m.text == "⭐ Saved")
 async def saved(m: types.Message):
     cursor.execute(
