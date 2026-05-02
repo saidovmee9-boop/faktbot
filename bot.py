@@ -11,6 +11,9 @@ from aiogram.utils import executor
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 
+if not TOKEN:
+    raise Exception("BOT_TOKEN is missing in environment variables")
+
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
@@ -44,7 +47,7 @@ conn.commit()
 FACTS = {
     "science": [
         ("Water boils at 100°C", "Вода кипит при 100°C", "Suv 100°C da qaynaydi"),
-        ("Earth has one moon", "У Земли один спутник", "Yerda bitta oy bor"),
+        ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
         ("Light is fastest", "Свет самый быстрый", "Yorug‘lik eng tez"),
     ],
     "history": [
@@ -103,7 +106,7 @@ def nav():
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    await message.answer("🚀 Fact Bot Ready", reply_markup=menu())
+    await message.answer("🚀 Ultra Fact Bot Ready", reply_markup=menu())
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
