@@ -12,8 +12,9 @@ API_TOKEN = 'SIZNING_YANGI_TOKENINGIZ'
 
 logging.basicConfig(level=logging.INFO)
 
+# Eski hamma narsani o'chirib, o'rniga shuni yozing:
+API_TOKEN = '8694174995:AAHKH0m8oHyAvd_JoMO_fQc_MqUTuZoN5q8' # BotFather bergan tokenni shu yerga qo'ying
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
 
 # --- MA'LUMOTLAR BAZASI ---
 def init_db():
