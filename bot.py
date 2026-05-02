@@ -5,26 +5,26 @@ import sqlite3
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.dispatcher.webhook import get_new_configured_app
 from aiogram.utils.executor import start_webhook
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = os.getenv("RENDER_EXTERNAL_URL")
+
 if not TOKEN:
     raise Exception("BOT_TOKEN missing")
+if not BASE_URL:
+    raise Exception("RENDER_EXTERNAL_URL missing")
 
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # Render URL
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
 
-# ================= DB =================
+# ================= DATABASE =================
 conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -87,7 +87,7 @@ def nav():
 # ================= HANDLERS =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Webhook bot ishlayapti!", reply_markup=menu())
+    await m.answer("🚀 Bot ishlayapti (PRO VERSION)", reply_markup=menu())
 
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
 async def category(m: types.Message):
@@ -142,7 +142,7 @@ async def saved(m: types.Message):
     if not rows:
         return await m.answer("No saved facts")
 
-    text = "⭐ SAVED:\n\n"
+    text = "⭐ SAVED FACTS:\n\n"
     for r in rows[-10:]:
         text += f"🇬🇧 {r[0]}\n🇷🇺 {r[1]}\n🇺🇿 {r[2]}\n\n"
 
@@ -155,14 +155,14 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
-app = get_new_configured_app(
-    dispatcher=dp,
-    path=WEBHOOK_PATH
-)
-
-app.on_startup.append(on_startup)
-app.on_shutdown.append(on_shutdown)
-
 # ================= RUN =================
 if __name__ == "__main__":
-    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    start_webhook(
+        dispatcher=dp,
+        webhook_path=WEBHOOK_PATH,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+        skip_updates=True,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
