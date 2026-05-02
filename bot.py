@@ -23,10 +23,10 @@ dp = Dispatcher(bot)
 # ================= WEB (RENDER FIX) =================
 app = web.Application()
 
-async def health(request):
+async def home(request):
     return web.Response(text="Bot is running 🚀")
 
-app.router.add_get("/", health)
+app.router.add_get("/", home)
 
 async def start_web():
     port = int(os.environ.get("PORT", 8080))
@@ -55,14 +55,6 @@ CREATE TABLE IF NOT EXISTS saved (
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS user_state (
-    user_id INTEGER PRIMARY KEY,
-    cat TEXT,
-    idx INTEGER DEFAULT 0
-)
-""")
-
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS games (
     game_id TEXT PRIMARY KEY,
     active INTEGER
@@ -84,15 +76,12 @@ FACTS = {
     "science": [
         ("Water boils at 100°C", "Suv 100°C da qaynaydi", "Вода кипит при 100°C"),
         ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi", "Земля вращается вокруг Солнца"),
-        ("Humans have 206 bones", "Insonda 206 ta suyak bor", "У человека 206 костей"),
     ],
     "history": [
         ("WW2 ended in 1945", "2-jahon urushi 1945 da tugagan", "Вторая мировая война закончилась в 1945"),
-        ("Rome was founded in 753 BC", "Rim 753 BC asos solingan", "Рим основан в 753 до н.э."),
     ],
     "tech": [
         ("Python is a programming language", "Python dasturlash tili", "Python язык программирования"),
-        ("AI means Artificial Intelligence", "AI sun’iy intellekt", "ИИ искусственный интеллект"),
     ]
 }
 
@@ -100,17 +89,9 @@ FACTS = {
 def main_kb():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📚 Science", "📜 History", "💻 Tech")
-    kb.add("🎲 Random", "❤️ Saved", "📊 Stats")
+    kb.add("🎲 Random", "📊 Stats")
     kb.add("🎯 Quiz Game")
     return kb
-
-# ================= USERNAME =================
-async def get_username(user_id):
-    try:
-        user = await bot.get_chat(user_id)
-        return user.username or user.first_name
-    except:
-        return str(user_id)
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
@@ -119,22 +100,10 @@ async def start(message: types.Message):
 
 # ================= FACT =================
 async def send_fact(message, cat):
-    user_id = message.from_user.id
-
-    cursor.execute("""
-        INSERT OR REPLACE INTO user_state (user_id, cat, idx)
-        VALUES (?, ?, 0)
-    """, (user_id, cat))
-    conn.commit()
-
     fact = random.choice(FACTS[cat])
 
     text = f"📌 FACT\n\n🇬🇧 {fact[0]}\n🇺🇿 {fact[1]}\n🇷🇺 {fact[2]}"
-
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("❤️ Save", callback_data="save"))
-
-    await message.answer(text, reply_markup=kb)
+    await message.answer(text)
 
 # ================= RANDOM =================
 async def random_fact(message):
@@ -149,7 +118,7 @@ async def stats(message):
     row = cursor.fetchone()
 
     views = row[0] if row else 0
-    await message.answer(f"📊 Ko‘rgan faktlar: {views}")
+    await message.answer(f"📊 Ko‘rgan: {views}")
 
 # ================= QUIZ =================
 def generate_quiz():
@@ -188,11 +157,6 @@ async def send_question(game_id):
             pass
 
     await asyncio.sleep(15)
-    await show_results(game_id)
-
-async def game_loop(game_id):
-    for _ in range(5):
-        await send_question(game_id)
 
 # ================= RESULTS =================
 async def show_results(game_id):
@@ -205,12 +169,11 @@ async def show_results(game_id):
 
     players = cursor.fetchall()
 
-    text = "🏆 LIVE RANKING\n\n"
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    text = "🏆 RESULT\n\n"
+    medals = ["🥇", "🥈", "🥉"]
 
     for i, p in enumerate(players[:10]):
-        username = await get_username(p[0])
-        text += f"{medals[i] if i < 3 else ''} @{username} — {p[1]} pts\n"
+        text += f"{medals[i] if i < 3 else ''} {p[0]} — {p[1]} pts\n"
 
     for u in players:
         try:
@@ -218,10 +181,20 @@ async def show_results(game_id):
         except:
             pass
 
-# ================= HANDLER =================
+# ================= GAME LOOP =================
+async def game_loop(game_id):
+    for _ in range(5):
+        await send_question(game_id)
+
+    await show_results(game_id)
+
+# ================= ROUTER =================
 @dp.message_handler()
 async def router(message: types.Message):
     text = message.text
+
+    if not text:
+        return
 
     if text == "📚 Science":
         await send_fact(message, "science")
@@ -254,15 +227,20 @@ async def router(message: types.Message):
         asyncio.create_task(game_loop(game_id))
         return
 
-    await message.answer("📌 Menyudan foydalaning", reply_markup=main_kb())
+    await message.answer("📌 Menyu ishlat", reply_markup=main_kb())
 
 # ================= CALLBACK =================
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("ans"))
 async def answer(call: types.CallbackQuery):
     try:
-        _, game_id, ans, correct = call.data.split(":")
+        parts = call.data.split(":")
+        if len(parts) != 4:
+            return await call.answer("error")
+
+        _, game_id, ans, correct = parts
+
     except:
-        return
+        return await call.answer("error")
 
     if ans == correct:
         cursor.execute("""
@@ -276,9 +254,10 @@ async def answer(call: types.CallbackQuery):
     else:
         await call.answer("❌")
 
-# ================= RUN =================
+# ================= STARTUP =================
 async def on_startup(dp):
     asyncio.create_task(start_web())
 
+# ================= RUN =================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
