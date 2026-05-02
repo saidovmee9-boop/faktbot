@@ -2,6 +2,8 @@ import os
 import logging
 import random
 import sqlite3
+from datetime import datetime
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
 
@@ -20,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= DB =================
+# ================= DATABASE =================
 conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -34,52 +36,93 @@ CREATE TABLE IF NOT EXISTS saved (
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS stats (
+CREATE TABLE IF NOT EXISTS seen (
     user_id INTEGER,
-    count INTEGER DEFAULT 0
+    fact TEXT
 )
 """)
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS stats (
+    user_id INTEGER,
+    date TEXT,
+    count INTEGER
+)
+""")
+
 conn.commit()
 
-# ================= FACTS (BIG DATABASE) =================
+# ================= FACTS =================
 FACTS = {
     "science": [
         ("Water boils at 100°C", "Вода кипит при 100°C", "Suv 100°C da qaynaydi"),
         ("Earth orbits the Sun", "Земля вращается вокруг Солнца", "Yer Quyosh atrofida aylanadi"),
         ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
+        ("Light travels faster than sound", "Свет быстрее звука", "Yorug‘lik tovushdan tez"),
     ],
     "history": [
         ("WW2 ended in 1945", "WW2 закончилась 1945", "WW2 1945 tugagan"),
-        ("Roman Empire fell in 476", "Рим пал в 476", "Rim imperiyasi 476 da qulagan"),
+        ("Roman Empire fell in 476", "Рим пал в 476", "Rim 476 da qulagan"),
+        ("Ancient Egypt built pyramids", "Древний Египет строил пирамиды", "Misr piramidalar qurgan"),
     ],
     "tech": [
         ("Internet started in 1983", "Интернет 1983", "Internet 1983"),
-        ("AI means Artificial Intelligence", "ИИ — искусственный интеллект", "AI sun’iy intellekt"),
+        ("AI means Artificial Intelligence", "ИИ — ИИ", "AI sun’iy intellekt"),
+        ("First computers were huge", "Первые компьютеры были огромные", "Birinchi kompyuterlar katta bo‘lgan"),
     ]
 }
 
-USED = set()
 USER_STATE = {}
 
-# ================= LOGIC =================
-def get_fact(cat):
+# ================= DATE =================
+def today():
+    return datetime.now().strftime("%Y-%m-%d")
+
+# ================= STATS =================
+def add_stat(user_id):
+    d = today()
+    cursor.execute("SELECT count FROM stats WHERE user_id=? AND date=?", (user_id, d))
+    row = cursor.fetchone()
+
+    if row:
+        cursor.execute("UPDATE stats SET count=count+1 WHERE user_id=? AND date=?", (user_id, d))
+    else:
+        cursor.execute("INSERT INTO stats VALUES (?,?,1)", (user_id, d))
+
+    conn.commit()
+
+def get_stat(user_id):
+    cursor.execute("SELECT count FROM stats WHERE user_id=? AND date=?", (user_id, today()))
+    row = cursor.fetchone()
+    return row[0] if row else 0
+
+# ================= FACT ENGINE (NO REPEAT PER USER) =================
+def get_fact(cat, user_id):
     pool = FACTS.get(cat, [])
-    available = [f for f in pool if f[0] not in USED]
+
+    cursor.execute("SELECT fact FROM seen WHERE user_id=?", (user_id,))
+    seen = [r[0] for r in cursor.fetchall()]
+
+    available = [f for f in pool if f[0] not in seen]
 
     if not available:
-        USED.clear()
+        cursor.execute("DELETE FROM seen WHERE user_id=?", (user_id,))
+        conn.commit()
         available = pool
 
     fact = random.choice(available)
-    USED.add(fact[0])
+
+    cursor.execute("INSERT INTO seen VALUES (?,?)", (user_id, fact[0]))
+    conn.commit()
+
     return fact
 
-def random_fact():
+def random_fact(user_id):
     all_facts = sum(FACTS.values(), [])
-    return random.choice(all_facts)
+    return get_fact(random.choice(list(FACTS.keys())), user_id)
 
 # ================= UI =================
-def main_menu():
+def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📚 Science", "🏛 History")
     kb.add("💻 Tech", "🎲 Random")
@@ -95,27 +138,44 @@ def nav():
     kb.add(types.InlineKeyboardButton("⭐ Save", callback_data="save"))
     return kb
 
+# ================= FORMAT =================
+def format_fact(title, fact):
+    return (
+        f"📚 <b>{title}</b>\n\n"
+        f"🇬🇧 {fact[0]}\n"
+        f"🇷🇺 {fact[1]}\n"
+        f"🇺🇿 {fact[2]}"
+    )
+
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 <b>FACT BOT PRO</b>", parse_mode="HTML", reply_markup=main_menu())
+    await m.answer("🚀 <b>PRO FACT BOT</b>", parse_mode="HTML", reply_markup=menu())
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
 async def category(m: types.Message):
     cat = m.text.split()[1].lower()
-    fact = get_fact(cat)
 
+    fact = get_fact(cat, m.from_user.id)
     USER_STATE[m.from_user.id] = {"cat": cat, "fact": fact}
 
-    await m.answer(format_fact(cat, fact), reply_markup=nav(), parse_mode="HTML")
+    add_stat(m.from_user.id)
+
+    await m.answer(
+        format_fact(cat.upper(), fact) + f"\n\n📊 Today: {get_stat(m.from_user.id)}",
+        reply_markup=nav(),
+        parse_mode="HTML"
+    )
 
 # ================= RANDOM =================
 @dp.message_handler(lambda m: m.text == "🎲 Random")
 async def random_handler(m: types.Message):
-    fact = random_fact()
+    fact = random_fact(m.from_user.id)
 
     USER_STATE[m.from_user.id] = {"cat": "random", "fact": fact}
+
+    add_stat(m.from_user.id)
 
     await m.answer(
         format_fact("🎲 RANDOM", fact),
@@ -133,9 +193,11 @@ async def nav_handler(c: types.CallbackQuery):
 
     cat = USER_STATE[uid]["cat"]
 
-    fact = random_fact() if cat == "random" else get_fact(cat)
+    fact = random_fact(uid) if cat == "random" else get_fact(cat, uid)
 
     USER_STATE[uid]["fact"] = fact
+
+    add_stat(uid)
 
     await c.message.edit_text(
         format_fact(cat.upper(), fact),
@@ -149,6 +211,7 @@ async def nav_handler(c: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "save")
 async def save(c: types.CallbackQuery):
     uid = c.from_user.id
+
     if uid not in USER_STATE:
         return await c.answer("No fact")
 
@@ -177,23 +240,12 @@ async def saved(m: types.Message):
 # ================= STATS =================
 @dp.message_handler(lambda m: m.text == "📊 Stats")
 async def stats(m: types.Message):
-    cursor.execute("SELECT COUNT(*) FROM saved WHERE user_id=?", (m.from_user.id,))
-    count = cursor.fetchone()[0]
+    count = get_stat(m.from_user.id)
 
     await m.answer(
-        f"📊 <b>YOUR STATS</b>\n\n"
-        f"⭐ Saved facts: <b>{count}</b>\n"
-        f"🔄 Daily tracking ready",
+        f"📊 <b>TODAY STATS</b>\n\n"
+        f"👀 Viewed: <b>{count}</b>",
         parse_mode="HTML"
-    )
-
-# ================= FORMAT =================
-def format_fact(title, fact):
-    return (
-        f"📚 <b>{title}</b>\n\n"
-        f"🇬🇧 {fact[0]}\n"
-        f"🇷🇺 {fact[1]}\n"
-        f"🇺🇿 {fact[2]}"
     )
 
 # ================= WEBHOOK =================
