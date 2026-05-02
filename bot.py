@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- SOZLAMALAR ---
-API_TOKEN = '8694174995:AAHeqynj_AfzkaNuNCdqtJ0xQBdpoyUlusI'
+API_TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
