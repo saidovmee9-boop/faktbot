@@ -9,7 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- 1. SOZLAMALAR ---
 # Tokenni BotFather'dan oling va aynan shu yerga qo'ying
-API_TOKEN = 'TOKENINGIZNI_SHU_YERGA_QO_YING'
+API_TOKEN = '8694174995:AAHKH0m8oHyAvd_JoMO_fQc_MqUTuZoN5q8'
 
 logging.basicConfig(level=logging.INFO)
 
