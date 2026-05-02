@@ -2,6 +2,7 @@ import os
 import logging
 import random
 import sqlite3
+import asyncio
 
 from aiogram import Bot, Dispatcher, executor, types
 from dotenv import load_dotenv
@@ -46,225 +47,172 @@ CREATE TABLE IF NOT EXISTS user_state (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS games (
+    game_id TEXT PRIMARY KEY,
+    active INTEGER
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS players (
+    game_id TEXT,
+    user_id INTEGER,
+    score INTEGER DEFAULT 0
+)
+""")
+
 conn.commit()
 
 # ================= FACTS =================
 FACTS = {
     "science": [
-        ("Water boils at 100°C", "Suv 100°C da qaynaydi", "Вода кипит при 100°C"),
-        ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi", "Земля вращается вокруг Солнца"),
-        ("Humans have 206 bones", "Insonda 206 ta suyak bor", "У человека 206 костей"),
-        ("Light is faster than sound", "Yorug‘lik tovushdan tez", "Свет быстрее звука"),
+        ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
+        ("Earth orbits the Sun", "Yer Quyosh atrofida aylanadi"),
+        ("Humans have 206 bones", "Insonda 206 ta suyak bor"),
+        ("Light is faster than sound", "Yorug‘lik tovushdan tez"),
     ],
     "history": [
-        ("WW2 ended in 1945", "2-jahon urushi 1945 da tugagan", "Вторая мировая война закончилась в 1945"),
-        ("Rome was founded in 753 BC", "Rim 753 BC asos solingan", "Рим основан в 753 до н.э."),
-        ("Columbus discovered America in 1492", "Kolumb 1492 yilda Amerika", "Колумб открыл Америку в 1492"),
+        ("WW2 ended in 1945", "2-jahon urushi 1945 da tugagan"),
+        ("Rome was founded in 753 BC", "Rim 753 BC asos solingan"),
+        ("Columbus discovered America in 1492", "Kolumb 1492 yilda Amerika"),
     ],
     "tech": [
-        ("Python is a programming language", "Python dasturlash tili", "Python язык программирования"),
-        ("AI means Artificial Intelligence", "AI sun’iy intellekt", "ИИ искусственный интеллект"),
-        ("CPU is brain of computer", "CPU kompyuter miyasi", "CPU мозг компьютера"),
+        ("Python is a programming language", "Python dasturlash tili"),
+        ("AI means Artificial Intelligence", "AI sun’iy intellekt"),
+        ("CPU is brain of computer", "CPU kompyuter miyasi"),
     ]
 }
 
-# ================= USER INIT =================
-async def ensure_user(user_id):
-    cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (user_id,))
-    conn.commit()
+# ================= QUIZ =================
+def generate_quiz():
+    cat = random.choice(list(FACTS.keys()))
+    fact = random.choice(FACTS[cat])
+
+    question = f"Quyidagi faktning o‘zbekcha tarjimasi qaysi?\n\n🇬🇧 {fact[0]}"
+    correct = fact[1]
+
+    wrong = []
+    for c in FACTS:
+        for f in FACTS[c]:
+            if f[1] != correct:
+                wrong.append(f[1])
+
+    options = random.sample(wrong, 2)
+    options.append(correct)
+    random.shuffle(options)
+
+    return question, correct, options
+
 
 # ================= KEYBOARD =================
 def main_kb():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("📚 Science", "📜 History", "💻 Tech")
     kb.add("🎲 Random", "❤️ Saved", "📊 Stats")
+    kb.add("🎯 Quiz Game")
     return kb
 
-# ================= ANY MESSAGE =================
-@dp.message_handler()
-async def any_message(message: types.Message):
-    await ensure_user(message.from_user.id)
 
-    text = message.text
-
-    if text in ["📚 Science", "📜 History", "💻 Tech"]:
-        await category(message)
-        return
-
-    if text == "🎲 Random":
-        await random_fact(message)
-        return
-
-    if text == "❤️ Saved":
-        await saved(message)
-        return
-
-    if text == "📊 Stats":
-        await stats(message)
-        return
-
-    await message.answer("📌 Menyudan foydalaning:", reply_markup=main_kb())
-
-# ================= CATEGORY =================
-async def category(message: types.Message):
-    cat_map = {
-        "📚 Science": "science",
-        "📜 History": "history",
-        "💻 Tech": "tech"
-    }
-
-    user_id = message.from_user.id
-    cat = cat_map[message.text]
-
-    cursor.execute("""
-        INSERT OR REPLACE INTO user_state (user_id, cat, idx)
-        VALUES (?, ?, 0)
-    """, (user_id, cat))
+# ================= USER INIT =================
+async def ensure_user(user_id):
+    cursor.execute("INSERT OR IGNORE INTO users(user_id) VALUES(?)", (user_id,))
     conn.commit()
 
-    await send_fact(message.chat.id, user_id)
 
-# ================= SEND FACT =================
-async def send_fact(chat_id, user_id, message_id=None):
-    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
-    data = cursor.fetchone()
+# ================= QUIZ GAME =================
+@dp.message_handler(lambda m: m.text == "🎯 Quiz Game")
+async def start_game(message: types.Message):
+    game_id = str(random.randint(1000, 9999))
 
-    if not data:
-        return
-
-    cat, idx = data
-    fact_en, fact_uz, fact_ru = FACTS[cat][idx]
-
-    kb = types.InlineKeyboardMarkup(row_width=3)
-
-    buttons = []
-    if idx > 0:
-        buttons.append(types.InlineKeyboardButton("⬅️", callback_data="prev"))
-    if idx < len(FACTS[cat]) - 1:
-        buttons.append(types.InlineKeyboardButton("➡️", callback_data="next"))
-
-    buttons.append(types.InlineKeyboardButton("❤️ Save", callback_data="save"))
-
-    kb.add(*buttons)
-
-    cursor.execute("UPDATE users SET views = views + 1 WHERE user_id=?", (user_id,))
+    cursor.execute("INSERT INTO games VALUES (?, ?)", (game_id, 1))
+    cursor.execute("INSERT INTO players VALUES (?, ?, 0)", (game_id, message.from_user.id))
     conn.commit()
-
-    text = (
-        f"📌 FACT\n\n"
-        f"🇬🇧 {fact_en}\n"
-        f"🇺🇿 {fact_uz}\n"
-        f"🇷🇺 {fact_ru}"
-    )
-
-    if message_id:
-        await bot.edit_message_text(text, chat_id, message_id, reply_markup=kb)
-    else:
-        await bot.send_message(chat_id, text, reply_markup=kb)
-
-# ================= NAVIGATION =================
-@dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
-async def nav(call: types.CallbackQuery):
-    user_id = call.from_user.id
-
-    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
-    data = cursor.fetchone()
-
-    if not data:
-        return await call.answer("Avval kategoriya tanlang")
-
-    cat, idx = data
-
-    if call.data == "next":
-        idx += 1
-    else:
-        idx -= 1
-
-    idx = max(0, min(idx, len(FACTS[cat]) - 1))
-
-    cursor.execute("""
-        UPDATE user_state SET idx=? WHERE user_id=?
-    """, (idx, user_id))
-    conn.commit()
-
-    await send_fact(call.message.chat.id, user_id, call.message.message_id)
-    await call.answer()
-
-# ================= SAVE =================
-@dp.callback_query_handler(lambda c: c.data == "save")
-async def save(call: types.CallbackQuery):
-    user_id = call.from_user.id
-
-    cursor.execute("SELECT cat, idx FROM user_state WHERE user_id=?", (user_id,))
-    cat, idx = cursor.fetchone()
-
-    fact_en = FACTS[cat][idx][0]
-
-    cursor.execute(
-        "INSERT OR IGNORE INTO saved VALUES (?, ?)",
-        (user_id, fact_en)
-    )
-    conn.commit()
-
-    await call.answer("❤️ Saqlandi!")
-
-# ================= RANDOM =================
-async def random_fact(message: types.Message):
-    cat = random.choice(list(FACTS.keys()))
-    fact_en, fact_uz, fact_ru = random.choice(FACTS[cat])
 
     await message.answer(
-        f"🎲 RANDOM\n\n🇬🇧 {fact_en}\n🇺🇿 {fact_uz}\n🇷🇺 {fact_ru}"
+        f"🎮 QUIZ BOSHLANDI!\n\n"
+        f"🆔 Game ID: {game_id}\n"
+        f"/join {game_id} bilan boshqalar qo‘shiladi\n"
+        f"🏆 5 ta savol bo‘ladi"
     )
 
-# ================= SAVED =================
-async def saved(message: types.Message):
-    cursor.execute("SELECT fact FROM saved WHERE user_id=?", (message.from_user.id,))
-    data = cursor.fetchall()
+    asyncio.create_task(run_game(game_id))
 
-    if not data:
-        return await message.answer("Hech narsa yo‘q 😢")
 
-    for f in data:
-        await message.answer(f"❤️ {f[0]}")
+@dp.message_handler(lambda m: m.text.startswith("/join"))
+async def join_game(message: types.Message):
+    try:
+        game_id = message.text.split()[1]
+    except:
+        return await message.answer("❌ Xato ID")
 
-# ================= STATS =================
-async def stats(message: types.Message):
-    cursor.execute("SELECT views FROM users WHERE user_id=?", (message.from_user.id,))
-    row = cursor.fetchone()
+    cursor.execute("INSERT INTO players VALUES (?, ?, 0)", (game_id, message.from_user.id))
+    conn.commit()
 
-    views = row[0] if row else 0
-    await message.answer(f"📊 Siz {views} ta fakt ko‘rgansiz")
+    await message.answer("✅ Qo‘shildingiz!")
 
-# ================= WEB =================
-runner = None
 
-async def handle(request):
-    return web.Response(text="Bot is running!")
+async def send_question(game_id):
+    question, correct, options = generate_quiz()
 
-async def on_startup(dp):
-    global runner
+    kb = types.InlineKeyboardMarkup()
+    for opt in options:
+        kb.add(types.InlineKeyboardButton(opt, callback_data=f"ans:{game_id}:{opt}:{correct}"))
 
-    app = web.Application()
-    app.router.add_get("/", handle)
+    cursor.execute("SELECT user_id FROM players WHERE game_id=?", (game_id,))
+    users = cursor.fetchall()
 
-    runner = web.AppRunner(app)
-    await runner.setup()
+    for u in users:
+        await bot.send_message(u[0], f"🎯 QUIZ\n\n{question}", reply_markup=kb)
 
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
 
-async def on_shutdown(dp):
-    global runner
-    if runner:
-        await runner.cleanup()
+async def run_game(game_id):
+    for _ in range(5):
+        await send_question(game_id)
+        await asyncio.sleep(15)
+
+    await show_results(game_id)
+
+
+@dp.callback_query_handler(lambda c: c.data.startswith("ans"))
+async def answer(call: types.CallbackQuery):
+    _, game_id, answer, correct = call.data.split(":")
+
+    if answer == correct:
+        cursor.execute("""
+            UPDATE players SET score = score + 1
+            WHERE user_id=? AND game_id=?
+        """, (call.from_user.id, game_id))
+        conn.commit()
+
+        await call.answer("✅ To‘g‘ri!")
+    else:
+        await call.answer(f"❌ Noto‘g‘ri!\nJavob: {correct}")
+
+
+async def show_results(game_id):
+    cursor.execute("""
+        SELECT user_id, score
+        FROM players
+        WHERE game_id=?
+        ORDER BY score DESC
+    """, (game_id,))
+
+    players = cursor.fetchall()
+
+    text = "🏆 NATIJA\n\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+
+    for i, p in enumerate(players[:5]):
+        text += f"{medals[i]} {p[0]} — {p[1]} ball\n"
+
+    cursor.execute("SELECT user_id FROM players WHERE game_id=?", (game_id,))
+    users = cursor.fetchall()
+
+    for u in users:
+        await bot.send_message(u[0], text)
+
 
 # ================= RUN =================
 if __name__ == "__main__":
-    executor.start_polling(
-        dp,
-        skip_updates=True,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown
-    )
+    executor.start_polling(dp, skip_updates=True)
