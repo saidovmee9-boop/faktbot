@@ -2,8 +2,6 @@ import os
 import random
 import sqlite3
 import logging
-import asyncio
-from aiohttp import web
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types
@@ -18,38 +16,24 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= WEB (RENDER HEALTH) =================
-app = web.Application()
-
-async def health(request):
-    return web.Response(text="Bot is alive 🚀")
-
-app.router.add_get("/", health)
-
-async def start_web():
-    port = int(os.environ.get("PORT", 8080))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-
 # ================= DB =================
 conn = sqlite3.connect("bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS saved_facts (
+CREATE TABLE IF NOT EXISTS stats (
     user_id INTEGER,
-    en TEXT,
-    uz TEXT
+    category TEXT,
+    views INTEGER DEFAULT 0
 )
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS stats (
-    user_id INTEGER PRIMARY KEY,
-    correct INTEGER DEFAULT 0,
-    wrong INTEGER DEFAULT 0
+CREATE TABLE IF NOT EXISTS saved (
+    user_id INTEGER,
+    en TEXT,
+    ru TEXT,
+    uz TEXT
 )
 """)
 
@@ -58,132 +42,150 @@ conn.commit()
 # ================= FACTS =================
 FACTS = {
     "science": [
-        ("Water boils at 100°C", "Suv 100°C da qaynaydi"),
-        ("Humans have 206 bones", "Insonda 206 ta suyak bor"),
+        ("Water boils at 100°C", "Вода кипит при 100°C", "Suv 100°C da qaynaydi"),
+        ("Earth has one moon", "У Земли один спутник", "Yerda bitta oy bor"),
+        ("Light is fastest", "Свет самый быстрый", "Yorug‘lik eng tez"),
+        ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
+        ("Gravity pulls objects", "Гравитация притягивает", "Gravitatsiya tortadi"),
     ],
     "history": [
-        ("WW2 ended in 1945", "WW2 1945-yilda tugagan"),
-        ("Uzbekistan independence 1991", "O‘zbekiston 1991-yilda mustaqil bo‘lgan"),
+        ("WW2 ended in 1945", "Вторая мировая закончилась в 1945", "WW2 1945 tugagan"),
+        ("Rome was founded 753 BC", "Рим основан в 753 до н.э.", "Rim 753 BC tashkil topgan"),
+        ("Cold War ended 1991", "Холодная война закончилась 1991", "Sovuq urush 1991 tugagan"),
+        ("Napoleon born 1769", "Наполеон родился в 1769", "Napoleon 1769 tug‘ilgan"),
+        ("USA independence 1776", "США независимость 1776", "AQSH 1776 mustaqil"),
     ],
     "tech": [
-        ("AI means Artificial Intelligence", "AI — sun’iy intellekt"),
-        ("Internet started in 1983", "Internet 1983-yilda boshlangan"),
+        ("Internet started 1983", "Интернет начался в 1983", "Internet 1983 boshlangan"),
+        ("AI means Artificial Intelligence", "ИИ означает ИИ", "AI sun’iy intellekt"),
+        ("First iPhone 2007", "Первый iPhone 2007", "Birinchi iPhone 2007"),
+        ("Python created 1991", "Python создан 1991", "Python 1991 yaratilgan"),
+        ("Google founded 1998", "Google основан 1998", "Google 1998 tashkil topgan"),
     ]
 }
 
-CATEGORY_WEIGHTS = {
-    "science": 50,
-    "history": 30,
-    "tech": 20
-}
+CATEGORIES = ["science", "history", "tech", "saved"]
 
-GAME_STATE = {}
+# global used facts memory
+USED = set()
+
+USER_STATE = {}
 
 # ================= UTIL =================
-def pick_category():
-    pool = []
-    for k, v in CATEGORY_WEIGHTS.items():
-        pool += [k] * v
-    return random.choice(pool)
+def get_fact(cat):
+    pool = FACTS.get(cat, [])
+    available = [f for f in pool if f[0] not in USED]
 
-def generate_question():
-    cat = pick_category()
-    fact = random.choice(FACTS[cat])
+    if not available:
+        USED.clear()
+        available = pool
 
-    correct = fact[1]
+    fact = random.choice(available)
+    USED.add(fact[0])
+    return fact
 
-    wrong = []
-    for c in FACTS:
-        for f in FACTS[c]:
-            if f[1] != correct:
-                wrong.append(f[1])
+def update_stats(user_id, cat):
+    cursor.execute("""
+    INSERT INTO stats(user_id, category, views)
+    VALUES (?,?,1)
+    ON CONFLICT(user_id, category)
+    DO UPDATE SET views = views + 1
+    """, (user_id, cat))
+    conn.commit()
 
-    options = random.sample(wrong, min(2, len(wrong)))
-    options.append(correct)
-    random.shuffle(options)
+def get_stats(user_id):
+    cursor.execute("""
+    SELECT category, views FROM stats WHERE user_id=?
+    """, (user_id,))
+    return cursor.fetchall()
 
-    return cat, fact, correct, options
-
-# ================= KEYBOARD =================
-def kb_main():
+# ================= UI =================
+def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🎮 Quiz")
-    kb.add("⭐ Saved Facts")
+    kb.add("📚 Science", "🏛 History")
+    kb.add("💻 Tech", "⭐ Saved")
+    kb.add("📊 Stats")
+    return kb
+
+def nav_kb(cat):
+    kb = types.InlineKeyboardMarkup()
+    kb.add(
+        types.InlineKeyboardButton("⬅️ Prev", callback_data=f"prev:{cat}"),
+        types.InlineKeyboardButton("➡️ Next", callback_data=f"next:{cat}")
+    )
+    kb.add(
+        types.InlineKeyboardButton("⭐ Save", callback_data="save")
+    )
     return kb
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    await message.answer("🔥 Quiz Bot Ready", reply_markup=kb_main())
+    await message.answer("🚀 Ultra Fact Bot Ready", reply_markup=menu())
 
-# ================= QUIZ =================
-@dp.message_handler(lambda m: m.text == "🎮 Quiz")
-async def quiz(message: types.Message):
-    GAME_STATE[message.from_user.id] = {"answered": False}
+# ================= CATEGORY =================
+@dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
+async def open_category(message: types.Message):
+    cat = message.text.split()[1].lower()
 
-    cat, fact, correct, options = generate_question()
+    fact = get_fact(cat)
 
-    kb = types.InlineKeyboardMarkup()
-    for o in options:
-        kb.add(types.InlineKeyboardButton(
-            o,
-            callback_data=f"ans:{correct}:{fact[0]}:{fact[1]}"
-        ))
+    USER_STATE[message.from_user.id] = {
+        "cat": cat,
+        "fact": fact
+    }
+
+    update_stats(message.from_user.id, cat)
 
     await message.answer(
-        f"🎯 {cat.upper()}\n\n🇬🇧 {fact[0]}",
-        reply_markup=kb
+        f"📚 {cat.upper()}\n\n🇬🇧 {fact[0]}\n🇷🇺 {fact[1]}\n🇺🇿 {fact[2]}",
+        reply_markup=nav_kb(cat)
     )
 
-# ================= ANSWER =================
-@dp.callback_query_handler(lambda c: c.data.startswith("ans"))
-async def answer(call: types.CallbackQuery):
-    _, correct, en, uz = call.data.split(":", 3)
+# ================= NAVIGATION =================
+@dp.callback_query_handler(lambda c: c.data.startswith(("next", "prev")))
+async def nav(call: types.CallbackQuery):
+    action, cat = call.data.split(":")
 
-    if call.from_user.id in GAME_STATE and GAME_STATE[call.from_user.id]["answered"]:
-        return await call.answer("Already answered")
+    fact = get_fact(cat)
 
-    GAME_STATE.setdefault(call.from_user.id, {})["answered"] = True
+    USER_STATE[call.from_user.id] = {
+        "cat": cat,
+        "fact": fact
+    }
 
-    if call.data.split(":")[1] == call.data.split(":")[1]:
-        cursor.execute("""
-            INSERT OR IGNORE INTO stats(user_id, correct, wrong)
-            VALUES (?,0,0)
-        """, (call.from_user.id,))
+    update_stats(call.from_user.id, cat)
 
-        cursor.execute("""
-            UPDATE stats SET correct = correct + 1
-            WHERE user_id=?
-        """, (call.from_user.id,))
-        conn.commit()
+    await call.message.edit_text(
+        f"📚 {cat.upper()}\n\n🇬🇧 {fact[0]}\n🇷🇺 {fact[1]}\n🇺🇿 {fact[2]}",
+        reply_markup=nav_kb(cat)
+    )
 
-        cursor.execute("""
-            INSERT INTO saved_facts(user_id, en, uz)
-            VALUES (?,?,?)
-        """, (call.from_user.id, en, uz))
-        conn.commit()
+    await call.answer()
 
-        await call.answer("✅ Correct + Saved")
-    else:
-        cursor.execute("""
-            INSERT OR IGNORE INTO stats(user_id, correct, wrong)
-            VALUES (?,0,0)
-        """, (call.from_user.id,))
+# ================= SAVE =================
+@dp.callback_query_handler(lambda c: c.data == "save")
+async def save(call: types.CallbackQuery):
+    state = USER_STATE.get(call.from_user.id)
 
-        cursor.execute("""
-            UPDATE stats SET wrong = wrong + 1
-            WHERE user_id=?
-        """, (call.from_user.id,))
-        conn.commit()
+    if not state:
+        return await call.answer("No fact")
 
-        await call.answer("❌ Wrong")
+    en, ru, uz = state["fact"]
 
-# ================= SAVED FACTS =================
-@dp.message_handler(lambda m: m.text == "⭐ Saved Facts")
+    cursor.execute("""
+    INSERT INTO saved(user_id, en, ru, uz)
+    VALUES (?,?,?,?)
+    """, (call.from_user.id, en, ru, uz))
+    conn.commit()
+
+    await call.answer("⭐ Saved!")
+
+# ================= SAVED =================
+@dp.message_handler(lambda m: m.text == "⭐ Saved")
 async def saved(message: types.Message):
     cursor.execute("""
-        SELECT en, uz FROM saved_facts
-        WHERE user_id=?
+    SELECT en, ru, uz FROM saved WHERE user_id=?
     """, (message.from_user.id,))
 
     rows = cursor.fetchall()
@@ -192,14 +194,24 @@ async def saved(message: types.Message):
         return await message.answer("No saved facts")
 
     text = "⭐ SAVED FACTS:\n\n"
+
     for r in rows[-10:]:
-        text += f"🇬🇧 {r[0]}\n🇺🇿 {r[1]}\n\n"
+        text += f"🇬🇧 {r[0]}\n🇷🇺 {r[1]}\n🇺🇿 {r[2]}\n\n"
 
     await message.answer(text)
 
-# ================= STARTUP =================
-async def on_startup(_):
-    asyncio.create_task(start_web())
+# ================= STATS =================
+@dp.message_handler(lambda m: m.text == "📊 Stats")
+async def stats(message: types.Message):
+    rows = get_stats(message.from_user.id)
 
+    text = "📊 YOUR STATS:\n\n"
+
+    for r in rows:
+        text += f"{r[0]}: {r[1]} views\n"
+
+    await message.answer(text or "No stats yet")
+
+# ================= RUN =================
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(dp, skip_updates=True)
