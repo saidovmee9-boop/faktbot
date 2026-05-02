@@ -2,21 +2,29 @@ import os
 import logging
 import random
 import sqlite3
+
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.dispatcher.webhook import get_new_configured_app
+from aiogram.utils.executor import start_webhook
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
-
 if not TOKEN:
-    raise Exception("BOT_TOKEN is missing")
+    raise Exception("BOT_TOKEN missing")
+
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # Render URL
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
+dp.middleware.setup(LoggingMiddleware())
 
-# ================= DATABASE (Render-safe) =================
+# ================= DB =================
 conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -67,44 +75,38 @@ def menu():
     kb.add("💻 Tech", "⭐ Saved")
     return kb
 
-
 def nav():
     kb = types.InlineKeyboardMarkup()
     kb.add(
-        types.InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
-        types.InlineKeyboardButton("➡️ Next", callback_data="next")
+        types.InlineKeyboardButton("⬅️", callback_data="prev"),
+        types.InlineKeyboardButton("➡️", callback_data="next")
     )
     kb.add(types.InlineKeyboardButton("⭐ Save", callback_data="save"))
     return kb
 
-# ================= START =================
+# ================= HANDLERS =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Fact Bot is running perfectly!", reply_markup=menu())
+    await m.answer("🚀 Webhook bot ishlayapti!", reply_markup=menu())
 
-# ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
 async def category(m: types.Message):
     cat = m.text.split()[1].lower()
     fact = get_fact(cat)
 
-    USER_STATE[m.from_user.id] = {
-        "cat": cat,
-        "fact": fact
-    }
+    USER_STATE[m.from_user.id] = {"cat": cat, "fact": fact}
 
     await m.answer(
         f"📚 {cat.upper()}\n\n🇬🇧 {fact[0]}\n🇷🇺 {fact[1]}\n🇺🇿 {fact[2]}",
         reply_markup=nav()
     )
 
-# ================= NAVIGATION =================
 @dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
 async def nav_handler(c: types.CallbackQuery):
     uid = c.from_user.id
 
     if uid not in USER_STATE:
-        return await c.answer("Send /start first")
+        return await c.answer("Start first")
 
     cat = USER_STATE[uid]["cat"]
     fact = get_fact(cat)
@@ -118,7 +120,6 @@ async def nav_handler(c: types.CallbackQuery):
 
     await c.answer()
 
-# ================= SAVE =================
 @dp.callback_query_handler(lambda c: c.data == "save")
 async def save(c: types.CallbackQuery):
     uid = c.from_user.id
@@ -128,34 +129,40 @@ async def save(c: types.CallbackQuery):
 
     en, ru, uz = USER_STATE[uid]["fact"]
 
-    cursor.execute(
-        "INSERT INTO saved VALUES (?,?,?,?)",
-        (uid, en, ru, uz)
-    )
+    cursor.execute("INSERT INTO saved VALUES (?,?,?,?)", (uid, en, ru, uz))
     conn.commit()
 
     await c.answer("Saved ⭐")
 
-# ================= SAVED LIST =================
 @dp.message_handler(lambda m: m.text == "⭐ Saved")
 async def saved(m: types.Message):
-    cursor.execute(
-        "SELECT en, ru, uz FROM saved WHERE user_id=?",
-        (m.from_user.id,)
-    )
-
+    cursor.execute("SELECT en, ru, uz FROM saved WHERE user_id=?", (m.from_user.id,))
     rows = cursor.fetchall()
 
     if not rows:
         return await m.answer("No saved facts")
 
-    text = "⭐ SAVED FACTS:\n\n"
-
+    text = "⭐ SAVED:\n\n"
     for r in rows[-10:]:
         text += f"🇬🇧 {r[0]}\n🇷🇺 {r[1]}\n🇺🇿 {r[2]}\n\n"
 
     await m.answer(text)
 
+# ================= WEBHOOK =================
+async def on_startup(dp):
+    await bot.set_webhook(WEBHOOK_URL)
+
+async def on_shutdown(dp):
+    await bot.delete_webhook()
+
+app = get_new_configured_app(
+    dispatcher=dp,
+    path=WEBHOOK_PATH
+)
+
+app.on_startup.append(on_startup)
+app.on_shutdown.append(on_shutdown)
+
 # ================= RUN =================
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    web.run_app(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
