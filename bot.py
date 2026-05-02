@@ -2,25 +2,21 @@ import os
 import logging
 import random
 import sqlite3
-from dotenv import load_dotenv
-
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
-# ================= SETUP =================
-load_dotenv()
-
+# ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
 
 if not TOKEN:
-    raise Exception("BOT_TOKEN missing in environment")
+    raise Exception("BOT_TOKEN is missing")
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= DATABASE =================
+# ================= DATABASE (Render-safe) =================
 conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
@@ -54,7 +50,6 @@ USER_STATE = {}
 # ================= LOGIC =================
 def get_fact(cat):
     pool = FACTS.get(cat, [])
-
     available = [f for f in pool if f[0] not in USED]
 
     if not available:
@@ -85,13 +80,12 @@ def nav():
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Fact Bot is running!", reply_markup=menu())
+    await m.answer("🚀 Fact Bot is running perfectly!", reply_markup=menu())
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
 async def category(m: types.Message):
     cat = m.text.split()[1].lower()
-
     fact = get_fact(cat)
 
     USER_STATE[m.from_user.id] = {
@@ -130,7 +124,7 @@ async def save(c: types.CallbackQuery):
     uid = c.from_user.id
 
     if uid not in USER_STATE:
-        return await c.answer("No fact found")
+        return await c.answer("No fact")
 
     en, ru, uz = USER_STATE[uid]["fact"]
 
