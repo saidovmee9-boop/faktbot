@@ -6,6 +6,8 @@ from datetime import datetime
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
+from aiohttp import web
+import asyncio
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
@@ -254,6 +256,39 @@ async def on_startup(dp):
 
 async def on_shutdown(dp):
     await bot.delete_webhook()
+
+
+
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def run_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render avtomatik tarzda 10000-portni yoki PORT o'zgaruvchisini beradi
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+
+
+async def main():
+    # 1. Web serverni orqa fonda ishga tushiramiz
+    asyncio.create_task(run_web_server())
+    
+    # 2. Botni ishga tushiramiz (eskicha holatda qolaveradi)
+    # Masalan sizda shunday bo'lishi mumkin:
+    bot = Bot(token="TOKEN")
+    dp = Dispatcher()
+    
+    print("Bot ishga tushdi...")
+    await dp.start_polling(bot, skip_updates=True)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+
 
 if __name__ == "__main__":
     start_webhook(
