@@ -2,8 +2,8 @@ import os
 import logging
 import random
 import sqlite3
+from datetime import datetime
 
-from aiohttp import web
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
 
@@ -11,10 +11,8 @@ from aiogram.utils.executor import start_webhook
 TOKEN = os.getenv("BOT_TOKEN")
 BASE_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-if not TOKEN:
-    raise Exception("BOT_TOKEN missing")
-if not BASE_URL:
-    raise Exception("RENDER_EXTERNAL_URL missing")
+if not TOKEN or not BASE_URL:
+    raise Exception("ENV missing")
 
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 WEBHOOK_URL = BASE_URL + WEBHOOK_PATH
@@ -24,9 +22,17 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= DATABASE =================
+# ================= DB =================
 conn = sqlite3.connect("/tmp/bot.db", check_same_thread=False)
 cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS stats (
+    user_id INTEGER,
+    date TEXT,
+    count INTEGER DEFAULT 0
+)
+""")
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS saved (
@@ -39,82 +45,100 @@ CREATE TABLE IF NOT EXISTS saved (
 conn.commit()
 
 # ================= FACTS =================
-FACTS = {
-    "science": [
-        ("Water boils at 100°C", "Вода кипит при 100°C", "Suv 100°C da qaynaydi"),
-        ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
-    ],
-    "history": [
-        ("WW2 ended in 1945", "WW2 закончилась 1945", "WW2 1945 tugagan"),
-    ],
-    "tech": [
-        ("Internet started in 1983", "Интернет 1983", "Internet 1983"),
-    ]
-}
+FACTS = [
+    ("Water boils at 100°C", "Вода кипит при 100°C", "Suv 100°C da qaynaydi"),
+    ("Humans have 206 bones", "У человека 206 костей", "Insonda 206 suyak bor"),
+    ("Internet started in 1983", "Интернет 1983", "Internet 1983"),
+    ("Earth has 1 moon", "У Земли 1 луна", "Yerda 1 oy bor"),
+]
 
-USED = set()
 USER_STATE = {}
 
-# ================= LOGIC =================
-def get_fact(cat):
-    pool = FACTS.get(cat, [])
-    available = [f for f in pool if f[0] not in USED]
+# ================= DATE =================
+def today():
+    return datetime.now().strftime("%Y-%m-%d")
 
-    if not available:
-        USED.clear()
-        available = pool
+# ================= STATS =================
+def add_stat(user_id):
+    d = today()
 
-    fact = random.choice(available)
-    USED.add(fact[0])
-    return fact
+    cursor.execute("SELECT count FROM stats WHERE user_id=? AND date=?", (user_id, d))
+    row = cursor.fetchone()
 
-# ================= KEYBOARDS =================
+    if row:
+        cursor.execute("UPDATE stats SET count=count+1 WHERE user_id=? AND date=?", (user_id, d))
+    else:
+        cursor.execute("INSERT INTO stats (user_id, date, count) VALUES (?,?,1)", (user_id, d))
+
+    conn.commit()
+
+def get_stat(user_id):
+    cursor.execute("SELECT count FROM stats WHERE user_id=? AND date=?", (user_id, today()))
+    row = cursor.fetchone()
+    return row[0] if row else 0
+
+# ================= FACT =================
+def get_fact():
+    return random.choice(FACTS)
+
+# ================= UI =================
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("📚 Science", "🏛 History")
-    kb.add("💻 Tech", "⭐ Saved")
+    kb.add("📚 Get Fact", "📊 My Stats")
+    kb.add("⭐ Saved")
     return kb
 
 def nav():
     kb = types.InlineKeyboardMarkup()
     kb.add(
-        types.InlineKeyboardButton("⬅️", callback_data="prev"),
-        types.InlineKeyboardButton("➡️", callback_data="next")
+        types.InlineKeyboardButton("➡️ Next", callback_data="next"),
+        types.InlineKeyboardButton("⭐ Save", callback_data="save")
     )
-    kb.add(types.InlineKeyboardButton("⭐ Save", callback_data="save"))
     return kb
 
 # ================= HANDLERS =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Bot ishlayapti (PRO VERSION)", reply_markup=menu())
+    await m.answer(
+        "🚀 <b>PRO FACT BOT</b>\nDaily stats + smart facts",
+        parse_mode="HTML",
+        reply_markup=menu()
+    )
 
-@dp.message_handler(lambda m: m.text in ["📚 Science", "🏛 History", "💻 Tech"])
-async def category(m: types.Message):
-    cat = m.text.split()[1].lower()
-    fact = get_fact(cat)
+@dp.message_handler(lambda m: m.text == "📚 Get Fact")
+async def fact(m: types.Message):
+    fact = get_fact()
+    USER_STATE[m.from_user.id] = fact
 
-    USER_STATE[m.from_user.id] = {"cat": cat, "fact": fact}
+    add_stat(m.from_user.id)
+
+    count = get_stat(m.from_user.id)
 
     await m.answer(
-        f"📚 {cat.upper()}\n\n🇬🇧 {fact[0]}\n🇷🇺 {fact[1]}\n🇺🇿 {fact[2]}",
+        f"📚 <b>FACT OF THE DAY</b>\n\n"
+        f"🇬🇧 {fact[0]}\n"
+        f"🇷🇺 {fact[1]}\n"
+        f"🇺🇿 {fact[2]}\n\n"
+        f"📊 Today viewed: <b>{count}</b>",
+        parse_mode="HTML",
         reply_markup=nav()
     )
 
-@dp.callback_query_handler(lambda c: c.data in ["next", "prev"])
-async def nav_handler(c: types.CallbackQuery):
-    uid = c.from_user.id
+@dp.callback_query_handler(lambda c: c.data == "next")
+async def next_fact(c: types.CallbackQuery):
+    fact = get_fact()
+    USER_STATE[c.from_user.id] = fact
 
-    if uid not in USER_STATE:
-        return await c.answer("Start first")
-
-    cat = USER_STATE[uid]["cat"]
-    fact = get_fact(cat)
-
-    USER_STATE[uid]["fact"] = fact
+    add_stat(c.from_user.id)
+    count = get_stat(c.from_user.id)
 
     await c.message.edit_text(
-        f"📚 {cat.upper()}\n\n🇬🇧 {fact[0]}\n🇷🇺 {fact[1]}\n🇺🇿 {fact[2]}",
+        f"📚 <b>NEW FACT</b>\n\n"
+        f"🇬🇧 {fact[0]}\n"
+        f"🇷🇺 {fact[1]}\n"
+        f"🇺🇿 {fact[2]}\n\n"
+        f"📊 Today viewed: <b>{count}</b>",
+        parse_mode="HTML",
         reply_markup=nav()
     )
 
@@ -127,12 +151,23 @@ async def save(c: types.CallbackQuery):
     if uid not in USER_STATE:
         return await c.answer("No fact")
 
-    en, ru, uz = USER_STATE[uid]["fact"]
+    en, ru, uz = USER_STATE[uid]
 
     cursor.execute("INSERT INTO saved VALUES (?,?,?,?)", (uid, en, ru, uz))
     conn.commit()
 
-    await c.answer("Saved ⭐")
+    await c.answer("⭐ Saved!")
+
+@dp.message_handler(lambda m: m.text == "📊 My Stats")
+async def stats(m: types.Message):
+    count = get_stat(m.from_user.id)
+
+    await m.answer(
+        f"📊 <b>TODAY STATS</b>\n\n"
+        f"👀 Viewed facts: <b>{count}</b>\n"
+        f"🔄 Resets daily at 00:00",
+        parse_mode="HTML"
+    )
 
 @dp.message_handler(lambda m: m.text == "⭐ Saved")
 async def saved(m: types.Message):
@@ -155,7 +190,6 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
-# ================= RUN =================
 if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
