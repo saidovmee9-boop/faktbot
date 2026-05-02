@@ -1,4 +1,4 @@
-import os
+import logging
 import asyncio
 import sqlite3
 import random
@@ -7,49 +7,52 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- SOZLAMALAR ---
-API_TOKEN = os.getenv("BOT_TOKEN")
+# DIQQAT: Yangi tokenni aynan shu yerga qo'shtirnoq ichiga yozing!
+API_TOKEN = 'SIZNING_YANGI_TOKENINGIZ'
+
+logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
 # --- MA'LUMOTLAR BAZASI ---
 def init_db():
-    conn = sqlite3.connect('factbot.db')
+    conn = sqlite3.connect('pro_fact.db')
     cursor = conn.cursor()
-    # Foydalanuvchilar va statistika
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
-                      (user_id INTEGER PRIMARY KEY, daily_count INTEGER DEFAULT 0)''')
-    # Saqlangan faktlar
-    cursor.execute('''CREATE TABLE IF NOT EXISTS saved_facts 
-                      (user_id INTEGER, fact_text TEXT)''')
-    # Ko'rilgan faktlar (qaytarilmasligi uchun)
-    cursor.execute('''CREATE TABLE IF NOT EXISTS viewed_facts 
-                      (user_id INTEGER, fact_id TEXT)''')
+    # Statistika uchun
+    cursor.execute('CREATE TABLE IF NOT EXISTS stats (user_id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)')
+    # Saqlanganlar uchun
+    cursor.execute('CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_text TEXT)')
+    # Ko'rilgan faktlarni eslab qolish uchun
+    cursor.execute('CREATE TABLE IF NOT EXISTS history (user_id INTEGER, fact_id INTEGER)')
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- FAKTLAR BAZASI (NAMUNA) ---
-# Haqiqiy botda buni JSON yoki kattaroq lug'at qilish tavsiya etiladi
+# --- FAKTLAR (UZ/RU) ---
+# Format: [id, "UZ | RU"]
 facts_data = {
     "science": [
-        "🇺🇿 Suv molekulasi 2 ta vodorod va 1 ta kisloroddan iborat. | 🇷🇺 Молекула воды состоит из 2 водородов и 1 кислорода.",
-        "🇺🇿 Yorug'lik tezligi sekundiga 300,000 km. | 🇷🇺 Скорость света 300,000 км/с."
+        [1, "🧬 Inson tanasidagi barcha DNK zanjirlari yoyilsa, Quyosh tizimidan chiqib ketadi.\n🇷🇺 Если развернуть все цепи ДНК человека, они выйдут за пределы Солнечной системы."],
+        [2, "🧬 Suv kosmosda qaynamaydi, balki muzlab qoladi.\n🇷🇺 В космосе вода не кипит, а мгновенно замерзает."],
+        [3, "🧬 Yer yuzidagi eng qattiq tabiiy modda - Olmos.\n🇷🇺 Самое твердое природное вещество на Земле — алмаз."]
     ],
     "history": [
-        "🇺🇿 Amir Temur 1336-yilda tug'ilgan. | 🇷🇺 Амир Темур родился в 1336 году.",
-        "🇺🇿 Ikkinchi jahon urushi 1945-yilda tugagan. | 🇷🇺 Вторая мировая война закончилась в 1945 году."
+        [4, "📜 Qadimgi Misrda mushukni o'ldirish eng og'ir jinoyat hisoblangan.\n🇷🇺 В Древнем Египте убийство кошки считалось тягчайшим преступлением."],
+        [5, "📜 Buyuk Britaniya va Zanzibar o'rtasidagi urush 38 daqiqa davom etgan.\n🇷🇺 Война между Великобританией и Занзибаром длилась всего 38 минут."],
+        [6, "📜 Napoleon aslida past bo'yli bo'lmagan (168 sm).\n🇷🇺 Наполеон на самом деле не был низкого роста (168 см)."]
     ],
     "tech": [
-        "🇺🇿 Birinchi kompyuter sichqonchasi yog'ochdan yasalgan. | 🇷🇺 Первая компьютерная мышь была сделана из дерева.",
-        "🇺🇿 Python tili 1991-yilda yaratilgan. | 🇷🇺 Язык Python был создан в 1991 году."
+        [7, "💻 Dunyodagi birinchi veb-sayt hali ham onlayn: info.cern.ch.\n🇷🇺 Первый в мире веб-сайт до сих пор онлайн: info.cern.ch."],
+        [8, "💻 'QWERTY' klaviaturasi yozishni sekinlashtirish uchun o'ylab topilgan.\n🇷🇺 Раскладка 'QWERTY' была придумана, чтобы замедлить скорость печати."],
+        [9, "💻 Birinchi 1GB xotira qurilmasi muzlatgichdek bo'lgan.\n🇷🇺 Первое запоминающее устройство на 1 ГБ было размером с холодильник."]
     ]
 }
 
-# --- WEB SERVER (RENDER UCHUN) ---
+# --- RENDER WEB SERVER ---
 async def handle(request):
-    return web.Response(text="Bot is running!")
+    return web.Response(text="Bot ishlayapti!")
 
 async def start_web_server():
     app = web.Application()
@@ -60,98 +63,117 @@ async def start_web_server():
     await site.start()
 
 # --- YORDAMCHI FUNKSIYALAR ---
-def get_user_data(user_id):
-    conn = sqlite3.connect('factbot.db')
+def update_stats(user_id):
+    conn = sqlite3.connect('pro_fact.db')
     cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
-    cursor.execute("SELECT daily_count FROM users WHERE user_id = ?", (user_id,))
-    res = cursor.fetchone()[0]
-    conn.close()
-    return res
-
-def update_stat(user_id):
-    conn = sqlite3.connect('factbot.db')
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET daily_count = daily_count + 1 WHERE user_id = ?", (user_id,))
+    cursor.execute('INSERT OR IGNORE INTO stats (user_id, count) VALUES (?, 0)', (user_id,))
+    cursor.execute('UPDATE stats SET count = count + 1 WHERE user_id = ?', (user_id,))
     conn.commit()
     conn.close()
 
+def add_to_history(user_id, fact_id):
+    conn = sqlite3.connect('pro_fact.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO history VALUES (?, ?)', (user_id, fact_id))
+    conn.commit()
+    conn.close()
+
+def get_viewed_ids(user_id):
+    conn = sqlite3.connect('pro_fact.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT fact_id FROM history WHERE user_id = ?', (user_id,))
+    res = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return res
+
 # --- KLAVIATURA ---
-def main_menu():
+def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add("Science 🧬", "History 📜", "Tech 💻", "Random 🎲", "Saved ⭐", "Statistika 📊")
     return markup
 
-def get_fact_kb(category, index, total, fact_text):
+def get_fact_kb(category, index, total):
     markup = InlineKeyboardMarkup(row_width=2)
-    buttons = []
+    btns = []
     if index > 0:
-        buttons.append(InlineKeyboardButton("⬅️ Orqaga", callback_data=f"prev_{category}_{index}"))
+        btns.append(InlineKeyboardButton("⬅️ Orqaga", callback_data=f"move_{category}_{index-1}"))
     if index < total - 1:
-        buttons.append(InlineKeyboardButton("Oldinga ➡️", callback_data=f"next_{category}_{index}"))
-    
-    markup.row(*buttons)
+        btns.append(InlineKeyboardButton("Oldinga ➡️", callback_data=f"move_{category}_{index+1}"))
+    markup.row(*btns)
     markup.add(InlineKeyboardButton("Saqlash ⭐", callback_data="save_this"))
     return markup
 
 # --- HANDLERLAR ---
 @dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    await message.answer("Xush kelibsiz! Faktlar dunyosiga marhamat.", reply_markup=main_menu())
+async def start(message: types.Message):
+    await message.answer("Sizga qanday faktlar kerak? Tanlang:", reply_markup=get_main_menu())
 
 @dp.message_handler(lambda m: m.text in ["Science 🧬", "History 📜", "Tech 💻", "Random 🎲"])
-async def show_fact(message: types.Message):
-    cat_map = {"Science 🧬": "science", "History 📜": "history", "Tech 💻": "tech", "Random 🎲": "random"}
-    category = cat_map[message.text]
+async def fact_handler(message: types.Message):
+    cat = message.text.split()[0].lower()
+    if cat == "random":
+        cat = random.choice(["science", "history", "tech"])
     
-    if category == "random":
-        category = random.choice(["science", "history", "tech"])
+    viewed = get_viewed_ids(message.from_user.id)
+    # Ko'rilmaganini topish
+    available_facts = [f for f in facts_data[cat] if f[0] not in viewed]
     
-    fact = facts_data[category][0]
-    update_stat(message.from_user.id)
-    await message.answer(fact, reply_markup=get_fact_kb(category, 0, len(facts_data[category]), fact))
+    if not available_facts:
+        await message.answer("Siz bu bo'limdagi barcha faktlarni ko'rib bo'ldingiz! ✅")
+        return
 
-@dp.callback_query_handler(lambda c: c.data.startswith(('next_', 'prev_')))
-async def navigate_facts(callback: types.CallbackQuery):
-    _, category, index = callback.data.split('_')
-    index = int(index)
-    new_index = index + 1 if callback.data.startswith('next_') else index - 1
+    fact = available_facts[0]
+    idx = facts_data[cat].index(fact)
     
-    fact = facts_data[category][new_index]
-    update_stat(callback.from_user.id)
-    await callback.message.edit_text(fact, reply_markup=get_fact_kb(category, new_index, len(facts_data[category]), fact))
+    update_stats(message.from_user.id)
+    add_to_history(message.from_user.id, fact[0])
+    
+    await message.answer(fact[1], reply_markup=get_fact_kb(cat, idx, len(facts_data[cat])))
+
+@dp.callback_query_handler(lambda c: c.data.startswith('move_'))
+async def navigation(call: types.CallbackQuery):
+    _, cat, idx = call.data.split('_')
+    idx = int(idx)
+    fact = facts_data[cat][idx]
+    
+    update_stats(call.from_user.id)
+    add_to_history(call.from_user.id, fact[0])
+    
+    await call.message.edit_text(fact[1], reply_markup=get_fact_kb(cat, idx, len(facts_data[cat])))
 
 @dp.callback_query_handler(text="save_this")
-async def save_fact(callback: types.CallbackQuery):
-    conn = sqlite3.connect('factbot.db')
+async def saver(call: types.CallbackQuery):
+    conn = sqlite3.connect('pro_fact.db')
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO saved_facts VALUES (?, ?)", (callback.from_user.id, callback.message.text))
+    cursor.execute('INSERT INTO saved VALUES (?, ?)', (call.from_user.id, call.message.text))
     conn.commit()
     conn.close()
-    await callback.answer("Saqlandi!")
-
-@dp.message_handler(text="Saved ⭐")
-async def show_saved(message: types.Message):
-    conn = sqlite3.connect('factbot.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT fact_text FROM saved_facts WHERE user_id = ?", (message.from_user.id,))
-    rows = cursor.fetchall()
-    conn.close()
-    
-    if not rows:
-        await message.answer("Sizda saqlangan faktlar yo'q.")
-    else:
-        for r in rows:
-            await message.answer(f"⭐ {r[0]}")
+    await call.answer("Saqlandi! ⭐")
 
 @dp.message_handler(text="Statistika 📊")
-async def show_stat(message: types.Message):
-    count = get_user_data(message.from_user.id)
-    await message.answer(f"📊 Siz jami {count} ta fakt ko'rgansiz.")
+async def stats(message: types.Message):
+    conn = sqlite3.connect('pro_fact.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT count FROM stats WHERE user_id = ?', (message.from_user.id,))
+    res = cursor.fetchone()
+    count = res[0] if res else 0
+    await message.answer(f"📊 Siz jami {count} ta faktni ko'rib chiqdingiz!")
+
+@dp.message_handler(text="Saved ⭐")
+async def saved_list(message: types.Message):
+    conn = sqlite3.connect('pro_fact.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT fact_text FROM saved WHERE user_id = ?', (message.from_user.id,))
+    rows = cursor.fetchall()
+    if not rows:
+        await message.answer("Saqlanganlar bo'sh.")
+    else:
+        for r in rows[-3:]:
+            await message.answer(f"⭐ {r[0]}")
 
 # --- ISHGA TUSHIRISH ---
 async def on_startup(dp):
-    await start_web_server()
+    asyncio.create_task(start_web_server())
 
 if __name__ == "__main__":
     executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
