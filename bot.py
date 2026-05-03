@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import asyncio
+import random
 from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -56,6 +57,42 @@ FACTS = {
     ]
 }
 
+# ================= AI GENERATOR =================
+subjects = [
+    ("Odam miyasi","Мозг человека","Human brain"),
+    ("Koinot","Вселенная","Universe"),
+    ("Sun’iy intellekt","Искусственный интеллект","Artificial intelligence"),
+    ("Texnologiya","Технологии","Technology"),
+    ("Yer sayyorasi","Планета Земля","Planet Earth")
+]
+
+actions = [
+    ("doim o‘rganadi","постоянно учится","is constantly learning"),
+    ("cheksiz rivojlanadi","развивается бесконечно","evolves endlessly"),
+    ("sirli qolmoqda","остается загадкой","remains a mystery"),
+    ("kutilmagan imkoniyatlarga ega","имеет неожиданные возможности","has unexpected capabilities"),
+    ("insonni hayratda qoldiradi","удивляет человека","amazes humans")
+]
+
+extras = [
+    ("va hali to‘liq o‘rganilmagan","и до конца не изучен","and is not fully understood"),
+    ("va bu faqat boshlanishi","и это только начало","and this is just the beginning"),
+    ("va kelajakni o‘zgartiradi","и изменит будущее","and will change the future"),
+    ("va har kuni yangilanmoqda","и обновляется каждый день","and updates every day"),
+    ("va insoniyat uchun muhim","и важно для человечества","and is important for humanity")
+]
+
+def generate_ai_fact():
+    s = random.choice(subjects)
+    a = random.choice(actions)
+    e = random.choice(extras)
+    return (
+        f"{s[0]} {a[0]} {e[0]}",
+        f"{s[1]} {a[1]} {e[1]}",
+        f"{s[2]} {a[2]} {e[2]}"
+    )
+
+# ================= STATE =================
 state = {}
 
 # ================= MENU =================
@@ -83,7 +120,12 @@ async def show(uid, chat_id, edit=False):
     cat = st["cat"]
     i = st["i"]
 
-    fact = FACTS[cat][i]
+    # 🔥 AI MIX
+    if random.random() < 0.4:
+        fact = generate_ai_fact()
+    else:
+        fact = FACTS[cat][i]
+
     text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
 
     kb = InlineKeyboardMarkup()
@@ -111,7 +153,7 @@ async def show(uid, chat_id, edit=False):
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Fact Bot Ready", reply_markup=menu())
+    await m.answer("🚀 Ultimate Fact Bot", reply_markup=menu())
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"])
@@ -145,15 +187,13 @@ async def nav(c):
     await show(uid, c.message.chat.id, edit=True)
     await c.answer()
 
-# ================= SAVE (FIXED) =================
+# ================= SAVE =================
 @dp.callback_query_handler(lambda c: c.data == "save")
 async def save(c):
     try:
         with db() as conn:
-            conn.execute(
-                "INSERT INTO saved VALUES (?,?)",
-                (c.from_user.id, c.message.text)
-            )
+            conn.execute("INSERT INTO saved VALUES (?,?)",
+                         (c.from_user.id, c.message.text))
         await c.answer("❤️ Saved")
     except:
         await c.answer("❗ Already saved")
@@ -162,7 +202,8 @@ async def save(c):
 @dp.message_handler(lambda m: "Saved" in m.text or "❤️" in m.text)
 async def saved(m):
     with db() as c:
-        rows = c.execute("SELECT text FROM saved WHERE uid=?", (m.from_user.id,)).fetchall()
+        rows = c.execute("SELECT text FROM saved WHERE uid=?",
+                         (m.from_user.id,)).fetchall()
 
     if not rows:
         return await m.answer("Empty")
