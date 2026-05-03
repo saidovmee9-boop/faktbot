@@ -1,18 +1,14 @@
 import os
 import sqlite3
 import asyncio
-import random
 from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
-
-ADMIN_ID = 123456789  # o'zingni id
 
 # ================= DB =================
 def db():
@@ -21,67 +17,47 @@ def db():
 def init_db():
     with db() as c:
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, text TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, premium INTEGER DEFAULT 0)")
-        c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, text TEXT)")
 init_db()
 
-# ================= FACTS =================
+# ================= FACTS (3 TIL BIRGA) =================
 FACTS = {
     "science": [
-        "Inson DNKsi bananga o‘xshaydi",
-        "Miya uxlaganda ham ishlaydi",
-        "Suv kosmosda muzlaydi",
-        "Yurak 24/7 ishlaydi",
-        "Odam 70% suv",
-        "Bakteriyalar tanada bor",
-        "Yer aylanadi",
-        "Miya juda kuchli",
-        "Koinot kengayadi",
-        "Tana energiya ishlab chiqaradi"
+        ("Inson DNKsi bananga o‘xshaydi","ДНК человека похожа на банан","Human DNA is similar to banana"),
+        ("Miya uxlaganda ham ishlaydi","Мозг работает во сне","Brain works during sleep"),
+        ("Suv kosmosda muzlaydi","Вода в космосе замерзает","Water freezes in space"),
+        ("Yurak 24/7 ishlaydi","Сердце работает 24/7","Heart works 24/7"),
+        ("Odam 70% suv","Человек 70% вода","Human is 70% water"),
+        ("Bakteriyalar tanada bor","Бактерии есть в теле","Bacteria exist in body"),
+        ("Yer aylanadi","Земля вращается","Earth rotates"),
+        ("Miya kuchli","Мозг мощный","Brain is powerful"),
+        ("Koinot kengayadi","Вселенная расширяется","Universe expands"),
+        ("Tana energiya ishlab chiqaradi","Тело производит энергию","Body produces energy")
     ],
     "tech": [
-        "Internet harbiy loyiha edi",
-        "AI tez rivojlanadi",
-        "Telefon mini kompyuter",
-        "Kod dunyoni boshqaradi",
-        "Cloud tizim mavjud",
-        "Serverlar 24/7",
-        "Robotlar rivojlanadi",
-        "Apps juda ko‘p",
-        "Cyber security muhim",
-        "Data juda qimmat"
+        ("Internet harbiy loyiha edi","Интернет был военным проектом","Internet was a military project"),
+        ("AI rivojlanmoqda","ИИ развивается","AI is evolving"),
+        ("Telefon mini kompyuter","Телефон мини ПК","Phone is mini PC"),
+        ("Kod dunyoni boshqaradi","Код управляет миром","Code runs the world"),
+        ("Cloud tizim bor","Облачные системы","Cloud systems exist"),
+        ("Server 24/7 ishlaydi","Сервер работает 24/7","Server runs 24/7"),
+        ("Robotlar rivojlanadi","Роботы развиваются","Robots evolve"),
+        ("Apps millionlab","Приложений миллионы","Millions of apps"),
+        ("Cyber xavfsizlik muhim","Кибербезопасность важна","Cybersecurity matters"),
+        ("Data juda qimmat","Данные дорогие","Data is valuable")
     ],
     "history": [
-        "Rim imperiyasi kuchli edi",
-        "Kleopatra mashhur",
-        "Vikinglar jangchi",
-        "Piramidalar sirli",
-        "Tarix boy",
-        "Urushlar bo‘lgan",
-        "Qirollar davri",
-        "Imperiyalar qulagan",
-        "Qadimiy shaharlar",
-        "O‘tmish qiziq"
+        ("Rim imperiyasi kuchli edi","Римская империя была сильной","Roman Empire was strong"),
+        ("Kleopatra mashhur edi","Клеопатра была известной","Cleopatra was famous"),
+        ("Vikinglar jangchi edi","Викинги были воинами","Vikings were warriors"),
+        ("Piramidalar sirli","Пирамиды загадка","Pyramids are mysterious"),
+        ("Tarix juda boy","История богата","History is rich"),
+        ("Urushlar bo‘lgan","Были войны","Wars happened"),
+        ("Qirollar davri","Эпоха королей","Age of kings"),
+        ("Imperiyalar qulagan","Империи пали","Empires fell"),
+        ("Qadimiy shaharlar","Древние города","Ancient cities"),
+        ("O‘tmish qiziq","Прошлое интересно","Past is interesting")
     ]
 }
-
-# ================= AI FAKE GENERATOR =================
-def ai_fact():
-    templates = [
-        "🤖 {a} sababli {b} bo‘ladi",
-        "🤖 Agar {a} bo‘lsa, {b} yuz beradi",
-        "🤖 Ilmiy jihatdan {a} {b} bilan bog‘liq",
-        "🤖 Tadqiqotlarga ko‘ra {a} juda muhim"
-    ]
-
-    a = random.choice([
-        "inson miyasi", "koinot", "AI", "atomlar", "energiya", "tabiat"
-    ])
-    b = random.choice([
-        "rivojlanish", "harakat", "o‘zgarish", "texnologiya", "hayot"
-    ])
-
-    return random.choice(templates).format(a=a, b=b)
 
 # ================= STATE =================
 state = {}
@@ -90,9 +66,8 @@ state = {}
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔬 Science","💻 Tech")
-    kb.add("📜 History","🤖 AI Fact")
-    kb.add("❤️ Saved","📊 Stats")
-    kb.add("💎 Premium","🛠 Admin")
+    kb.add("📜 History","❤️ Saved")
+    kb.add("📊 Stats")
     return kb
 
 # ================= SHOW =================
@@ -110,13 +85,13 @@ async def show(uid, chat_id):
     )
     kb.add(InlineKeyboardButton("❤️ Save", callback_data="save"))
 
-    await bot.send_message(chat_id, fact, reply_markup=kb)
+    text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+
+    await bot.send_message(chat_id, text, reply_markup=kb)
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    with db() as c:
-        c.execute("INSERT OR IGNORE INTO users VALUES (?,0)", (m.from_user.id,))
     await m.answer("🚀 Fact Bot Ready", reply_markup=menu())
 
 # ================= CATEGORY =================
@@ -128,18 +103,9 @@ async def h(m):
     if "Science" in t: cat="science"
     elif "Tech" in t: cat="tech"
     elif "History" in t: cat="history"
-    elif "AI Fact" in t:
-        return await m.answer(ai_fact())
-    elif "Saved" in t:
-        return await saved(m)
-    elif "Stats" in t:
-        return await stats(m)
-    elif "Premium" in t:
-        return await premium(m)
-    elif "Admin" in t:
-        return await admin(m)
-    else:
-        return
+    elif "Saved" in t: return await saved(m)
+    elif "Stats" in t: return await stats(m)
+    else: return
 
     state[uid] = {"cat":cat,"i":0}
     await show(uid,m.chat.id)
@@ -166,7 +132,7 @@ async def save(c):
     await c.answer("❤️ Saved")
 
 # ================= SAVED =================
-@dp.message_handler(lambda m:"Saved" in m.text)
+@dp.message_handler(lambda m:"Saved" in m.text or "❤️" in m.text)
 async def saved(m):
     with db() as c:
         rows=c.execute("SELECT text FROM saved WHERE uid=?",(m.from_user.id,)).fetchall()
@@ -176,7 +142,7 @@ async def saved(m):
 
     txt="❤️ SAVED:\n\n"
     for r in rows:
-        txt+=f"• {r[0]}\n"
+        txt+=f"{r[0]}\n\n"
 
     await m.answer(txt)
 
@@ -187,49 +153,11 @@ async def stats(m):
         count=c.execute("SELECT COUNT(*) FROM saved WHERE uid=?",(m.from_user.id,)).fetchone()[0]
     await m.answer(f"📊 Saved: {count}")
 
-# ================= PREMIUM =================
-@dp.message_handler(lambda m:"Premium" in m.text)
-async def premium(m):
-    with db() as c:
-        c.execute("UPDATE users SET premium=1 WHERE id=?",(m.from_user.id,))
-    await m.answer("💎 Premium activated")
-
-# ================= ADMIN =================
-@dp.message_handler(lambda m:"Admin" in m.text)
-async def admin(m):
-    if m.from_user.id!=ADMIN_ID:
-        return await m.answer("No access")
-
-    kb=types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("➕ Add Fact","📢 Post Channel")
-    await m.answer("Admin panel",reply_markup=kb)
-
-# ================= ADD FACT =================
-@dp.message_handler(lambda m:"Add Fact" in m.text)
-async def add(m):
-    if m.from_user.id!=ADMIN_ID: return
-
-    fact=ai_fact()
-
-    with db() as c:
-        c.execute("INSERT INTO facts (text) VALUES (?)",(fact,))
-
-    await m.answer("Added ✔️")
-
-# ================= CHANNEL POST =================
-@dp.message_handler(commands=["post"])
-async def post(m):
-    if m.from_user.id!=ADMIN_ID: return
-
-    fact=ai_fact()
-    await bot.send_message(CHANNEL_ID,"📢 FACT\n\n"+fact)
-    await m.answer("Posted")
-
-# ================= WEB FIX =================
+# ================= WEB (RENDER SAFE) =================
 async def handle(r):
     return web.Response(text="OK")
 
-async def web():
+async def web_app():
     app=web.Application()
     app.router.add_get("/",handle)
 
@@ -240,7 +168,7 @@ async def web():
     await site.start()
 
 async def on_startup(dp):
-    asyncio.create_task(web())
+    asyncio.create_task(web_app())
 
 # ================= RUN =================
 if __name__=="__main__":
