@@ -1,186 +1,187 @@
-import os
-import asyncio
-import logging
 import sqlite3
 import random
-from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-# --- 1. SOZLAMALAR ---
-# Tokenni BotFather'dan oling va aynan shu yerga qo'ying
-API_TOKEN = '8694174995:AAHKH0m8oHyAvd_JoMO_fQc_MqUTuZoN5q8'
-
-logging.basicConfig(level=logging.INFO)
-
+# --- KONFIGURATSIYA ---
+API_TOKEN = '8694174995:AAHKH0m8oHyAvd_JoMO_fQc_MqUTuZoN5q8' 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
-# --- 2. MA'LUMOTLAR BAZASI ---
+
 def init_db():
-    conn = sqlite3.connect('pro_fact.db')
+    conn = sqlite3.connect('factbot.db')
     cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS stats (user_id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_text TEXT)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS history (user_id INTEGER, fact_id INTEGER)')
+    # Foydalanuvchilar jadvali
+    cursor.execute('''CREATE TABLE IF NOT EXISTS users 
+                      (id INTEGER PRIMARY KEY, lang TEXT DEFAULT 'uz')''')
+    # Faktlar jadvali
+    cursor.execute('''CREATE TABLE IF NOT EXISTS facts 
+                      (id INTEGER PRIMARY KEY, category TEXT, 
+                       uz TEXT, ru TEXT, en TEXT, is_true INTEGER)''')
+    # Ko'rilgan faktlar
+    cursor.execute('''CREATE TABLE IF NOT EXISTS seen_facts 
+                      (user_id INTEGER, fact_id INTEGER)''')
+    # Saqlangan faktlar
+    cursor.execute('''CREATE TABLE IF NOT EXISTS saved_facts 
+                      (user_id INTEGER, fact_id INTEGER)''')
+    
+    # Namuna faktlar (Agar baza bo'sh bo'lsa)
+    cursor.execute("SELECT count(*) FROM facts")
+    if cursor.fetchone()[0] == 0:
+        sample_facts = [
+            ('Fan', 'Yulduzlar aslida miltillamaydi.', 'Звезды на самом деле не мерцают.', 'Stars don’t actually twinkle.', 1),
+            ('Tarix', 'Napoleon bo''yi juda past bo''lmagan.', 'Наполеон не был очень маленького роста.', 'Napoleon was not very short.', 1),
+            ('Dunyo', 'Fillar sakray olmaydi.', 'Слоны не умеют прыгать.', 'Elephants cannot jump.', 1)
+        ]
+        cursor.executemany("INSERT INTO facts (category, uz, ru, en, is_true) VALUES (?,?,?,?,?)", sample_facts)
+    
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- 3. PROFESSIONAL FAKTLAR BAZASI (3 Tilda) ---
-facts_data = {
-    "science": [
-        [1, "🧬 **Inson DNKsi 98% banan bilan bir xil.**\n🇷🇺 ДНК человека на 98% совпадает с ДНК банана.\n🇬🇧 Human DNA is 98% identical to a banana."],
-        [2, "🧬 **Suv kosmosda qaynamaydi, balki muzlab qoladi.**\n🇷🇺 В космосе вода не кипит, а мгновенно замерзает.\n🇬🇧 Water doesn't boil in space, it freezes."],
-        [3, "🧬 **Ahtapotlarning 3 ta yuragi va 9 ta miyasi bor.**\n🇷🇺 У осьминогов 3 сердца и 9 мозгов.\n🇬🇧 Octopuses have 3 hearts and 9 brains."],
-        [4, "🧬 **Inson tanasidagi barcha bakteriyalar vazni 2 kg gacha yetadi.**\n🇷🇺 Все бактерии в теле человека весят около 2 кг.\n🇬🇧 All the bacteria in the human body weigh about 2 kg."],
-        [5, "🧬 **Yulduzlararo masofa shu qadar kattaki, agar Quyosh tennis koptogi bo'lsa, eng yaqin yulduz 1000 km uzoqda bo'ladi.**\n🇷🇺 Если Солнце — теннисный мяч, то ближайшая звезда будет в 1000 км.\n🇬🇧 If the Sun were a tennis ball, the nearest star would be 1000 km away."]
-    ],
-    "history": [
-        [6, "📜 **Napoleon aslida past bo'yli bo'lmagan (168 sm).**\n🇷🇺 Наполеон на самом деле не был коротышкой (168 см).\n🇬🇧 Napoleon was not actually short (168 cm)."],
-        [7, "📜 **Qadimgi Rimda tish pastasi o'rnida siydik ishlatilgan.**\n🇷🇺 В Древнем Риме мочу использовали вместо зубной пасты.\n🇬🇧 In Ancient Rome, urine was used instead of toothpaste."],
-        [8, "📜 **Kleopatra ehromlar qurilgandan ko'ra, iPhone ixtirosiga yaqinroq vaqtda yashagan.**\n🇷🇺 Клеопатра жила ближе к изобретению iPhone, чем к строительству пирамид.\n🇬🇧 Cleopatra lived closer to the invention of the iPhone than the building of the pyramids."],
-        [9, "📜 **O'rta asrlarda hayvonlar sud qilinishi mumkin edi.**\n🇷🇺 В Средние века животных могли вызвать в суд.\n🇬🇧 In the Middle Ages, animals could be put on trial."],
-        [10, "📜 **Muzqaymoq aslida Xitoyda ixtiro qilingan.**\n🇷🇺 Мороженое было изобретено в Китае.\n🇬🇧 Ice cream was actually invented in China."]
-    ],
-    "tech": [
-        [11, "💻 **Birinchi kompyuter sichqonchasi yog'ochdan yasalgan.**\n🇷🇺 Первая компьютерная мышь была сделана из дерева.\n🇬🇧 The first computer mouse was made of wood."],
-        [12, "💻 **Dunyodagi barcha Bitcoinlarning 20% ga yaqini unutilgan parollar tufayli yo'qolgan.**\n🇷🇺 Около 20% всех биткоинов потеряны из-за забытых паролей.\n🇬🇧 About 20% of all Bitcoins are lost due to forgotten passwords."],
-        [13, "💻 **Google nomi 'Googol' (1 va 100 ta nol) so'zidan xato yozilish natijasida kelib chiqqan.**\n🇷🇺 Название Google возникло из-за ошибки в слове 'Googol'.\n🇬🇧 Google was named after a misspelling of 'Googol'."],
-        [14, "💻 **Internetning og'irligi taxminan bitta kichik qulupnayga teng (elektronlar vazni).**\n🇷🇺 Весь интернет весит примерно как одна клубника.\n🇬🇧 The entire internet weighs about as much as a single strawberry."],
-        [15, "💻 **Hozirgi kalkulyatorlar Oydagi birinchi odamni boshqargan kompyuterdan kuchliroq.**\n🇷🇺 Современные калькуляторы мощнее компьютера, отправившего людей на Луну.\n🇬🇧 Modern calculators are more powerful than the computer that sent humans to the Moon."]
-    ]
-}
-
-# --- 4. RENDER WEB SERVER ---
-async def handle(request):
-    return web.Response(text="Pro Fact Bot is Online 24/7!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
-    await site.start()
-
-# --- 5. YORDAMCHI FUNKSIYALAR ---
-def update_stats(user_id):
-    conn = sqlite3.connect('pro_fact.db')
+# --- YORDAMCHI FUNKSIYALAR ---
+def get_user_lang(user_id):
+    conn = sqlite3.connect('factbot.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO stats (user_id, count) VALUES (?, 0)', (user_id,))
-    cursor.execute('UPDATE stats SET count = count + 1 WHERE user_id = ?', (user_id,))
-    conn.commit()
+    cursor.execute("SELECT lang FROM users WHERE id = ?", (user_id,))
+    res = cursor.fetchone()
     conn.close()
+    return res[0] if res else 'uz'
 
-def add_to_history(user_id, fact_id):
-    conn = sqlite3.connect('pro_fact.db')
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO history VALUES (?, ?)', (user_id, fact_id))
-    conn.commit()
-    conn.close()
-
-def get_viewed_ids(user_id):
-    conn = sqlite3.connect('pro_fact.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT fact_id FROM history WHERE user_id = ?', (user_id,))
-    res = [r[0] for r in cursor.fetchall()]
-    conn.close()
-    return res
-
-# --- 6. PROFESSIONAL KLAVIATURALAR ---
-def get_main_menu():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add("Science 🧬", "History 📜", "Tech 💻", "Random 🎲", "Saved ⭐", "Statistika 📊")
+def get_keyboard(lang):
+    texts = {
+        'uz': ["🔍 Faktlar", "🎮 Quiz", "🌟 Saqlanganlar", "🎲 Tasodifiy", "🌐 Til"],
+        'ru': ["🔍 Факты", "🎮 Квиз", "🌟 Сохраненные", "🎲 Случайно", "🌐 Язык"],
+        'en': ["🔍 Facts", "🎮 Quiz", "🌟 Saved", "🎲 Random", "🌐 Language"]
+    }
+    t = texts[lang]
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(KeyboardButton(t[0]), KeyboardButton(t[1]))
+    markup.add(KeyboardButton(t[2]), KeyboardButton(t[3]))
+    markup.add(KeyboardButton(t[4]))
     return markup
 
-def get_fact_kb(category, index, total):
-    markup = InlineKeyboardMarkup(row_width=2)
-    btns = []
-    if index > 0:
-        btns.append(InlineKeyboardButton("⬅️ Back / Orqaga", callback_data=f"move_{category}_{index-1}"))
-    if index < total - 1:
-        btns.append(InlineKeyboardButton("Next / Oldinga ➡️", callback_data=f"move_{category}_{index+1}"))
-    markup.row(*btns)
-    markup.add(InlineKeyboardButton("Save ⭐ Saqlash", callback_data="save_this"))
-    return markup
+# --- HANDLERLAR ---
 
-# --- 7. HANDLERLAR ---
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
-    welcome_text = (
-        "👋 **Welcome to Pro Fact Bot!**\n\n"
-        "✨ Discover amazing facts in 3 languages!\n"
-        "✨ 3 tilda ajoyib faktlarni kashf eting!\n"
-        "✨ Откройте удивительные факты на 3 языках!"
-    )
-    await message.answer(welcome_text, reply_markup=get_main_menu(), parse_mode="Markdown")
-
-@dp.message_handler(lambda m: m.text in ["Science 🧬", "History 📜", "Tech 💻", "Random 🎲"])
-async def fact_handler(message: types.Message):
-    cat_raw = message.text.split()[0].lower()
-    category = cat_raw if cat_raw != "random" else random.choice(["science", "history", "tech"])
-    
-    viewed = get_viewed_ids(message.from_user.id)
-    available = [f for f in facts_data[category] if f[0] not in viewed]
-    
-    # Agar hamma fakt ko'rilgan bo'lsa, birinchisini ko'rsatadi
-    fact = available[0] if available else facts_data[category][0]
-    idx = facts_data[category].index(fact)
-    
-    update_stats(message.from_user.id)
-    add_to_history(message.from_user.id, fact[0])
-    
-    await message.answer(fact[1], reply_markup=get_fact_kb(category, idx, len(facts_data[category])), parse_mode="Markdown")
-
-@dp.callback_query_handler(lambda c: c.data.startswith('move_'))
-async def navigation(call: types.CallbackQuery):
-    _, cat, idx = call.data.split('_')
-    idx = int(idx)
-    fact = facts_data[cat][idx]
-    
-    update_stats(call.from_user.id)
-    add_to_history(call.from_user.id, fact[0])
-    
-    try:
-        await call.message.edit_text(fact[1], reply_markup=get_fact_kb(cat, idx, len(facts_data[cat])), parse_mode="Markdown")
-    except:
-        await call.answer()
-
-@dp.callback_query_handler(text="save_this")
-async def saver(call: types.CallbackQuery):
-    conn = sqlite3.connect('pro_fact.db')
+    user_id = message.from_id
+    conn = sqlite3.connect('factbot.db')
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO saved VALUES (?, ?)', (call.from_user.id, call.message.text))
+    cursor.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
     conn.commit()
     conn.close()
-    await call.answer("✅ Saved / Saqlandi / Сохранено")
+    
+    lang = get_user_lang(user_id)
+    welcome = {"uz": "Xush kelibsiz!", "ru": "Добро пожаловать!", "en": "Welcome!"}
+    await message.answer(welcome[lang], reply_markup=get_keyboard(lang))
 
-@dp.message_handler(text="Statistika 📊")
-async def stats(message: types.Message):
-    conn = sqlite3.connect('pro_fact.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT count FROM stats WHERE user_id = ?', (message.from_user.id,))
-    res = cursor.fetchone()
-    count = res[0] if res else 0
-    await message.answer(f"📊 **Total Facts Viewed:** {count}\n📊 **Jami ko'rilgan:** {count}\n📊 **Всего просмотрено:** {count}", parse_mode="Markdown")
+@dp.message_handler(lambda m: "🌐" in m.text)
+async def change_lang(message: types.Message):
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🇺🇿 O'zbekcha", callback_data="setlang_uz"))
+    markup.add(InlineKeyboardButton("🇷🇺 Русский", callback_data="setlang_ru"))
+    markup.add(InlineKeyboardButton("🇺🇸 English", callback_data="setlang_en"))
+    await message.answer("Tilni tanlang / Выберите язык / Choose language:", reply_markup=markup)
 
-@dp.message_handler(text="Saved ⭐")
-async def saved_list(message: types.Message):
-    conn = sqlite3.connect('pro_fact.db')
+@dp.callback_query_handler(lambda c: c.data.startswith('setlang_'))
+async def set_lang(callback: types.CallbackQuery):
+    lang = callback.data.split('_')[1]
+    conn = sqlite3.connect('factbot.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT fact_text FROM saved WHERE user_id = ?', (message.from_user.id,))
-    rows = cursor.fetchall()
-    if not rows:
-        await message.answer("📭 Your list is empty.")
+    cursor.execute("UPDATE users SET lang = ? WHERE id = ?", (lang, callback.from_user.id))
+    conn.commit()
+    conn.close()
+    await callback.message.delete()
+    await callback.message.answer("✅", reply_markup=get_keyboard(lang))
+
+@dp.message_handler(lambda m: "🎲" in m.text or "🔍" in m.text)
+async def send_fact(message: types.Message):
+    user_id = message.from_id
+    lang = get_user_lang(user_id)
+    
+    conn = sqlite3.connect('factbot.db')
+    cursor = conn.cursor()
+    # Bitta faktni takrorlamaslik uchun filtr
+    cursor.execute("""SELECT * FROM facts WHERE id NOT IN 
+                      (SELECT fact_id FROM seen_facts WHERE user_id = ?) 
+                      ORDER BY RANDOM() LIMIT 1""", (user_id,))
+    fact = cursor.fetchone()
+    
+    if not fact:
+        msg = {"uz": "Faktlar tugadi!", "ru": "Факты закончились!", "en": "No more facts!"}
+        await message.answer(msg[lang])
+        return
+
+    # Ko'rildi deb belgilash
+    cursor.execute("INSERT INTO seen_facts VALUES (?, ?)", (user_id, fact[0]))
+    conn.commit()
+    conn.close()
+
+    text = fact[2] if lang == 'uz' else (fact[3] if lang == 'ru' else fact[4])
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        InlineKeyboardButton("⬅️", callback_data="prev"), # Bu mantiqni baza orqali kengaytirish mumkin
+        InlineKeyboardButton("💾", callback_data=f"save_{fact[0]}"),
+        InlineKeyboardButton("➡️", callback_data="next_fact")
+    )
+    
+    await message.answer(f"<b>[{fact[1]}]</b>\n\n{text}", parse_mode="HTML", reply_markup=markup)
+
+@dp.callback_query_handler(lambda c: c.data == "next_fact")
+async def next_fact_callback(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await send_fact(callback.message)
+
+@dp.callback_query_handler(lambda c: c.data.startswith('save_'))
+async def save_fact(callback: types.CallbackQuery):
+    fact_id = callback.data.split('_')[1]
+    user_id = callback.from_user.id
+    conn = sqlite3.connect('factbot.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR IGNORE INTO saved_facts VALUES (?, ?)", (user_id, fact_id))
+    conn.commit()
+    conn.close()
+    await callback.answer("⭐ Saved!")
+
+@dp.message_handler(lambda m: "🎮" in m.text)
+async def quiz_mode(message: types.Message):
+    user_id = message.from_id
+    lang = get_user_lang(user_id)
+    conn = sqlite3.connect('factbot.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM facts ORDER BY RANDOM() LIMIT 1")
+    fact = cursor.fetchone()
+    conn.close()
+
+    text = fact[2] if lang == 'uz' else (fact[3] if lang == 'ru' else fact[4])
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("✅ Rost", callback_data=f"quiz_1_{fact[5]}"),
+        InlineKeyboardButton("❌ Yolg'on", callback_data=f"quiz_0_{fact[5]}")
+    )
+    q_text = {"uz": "Ushbu fakt rostmi?", "ru": "Это правда?", "en": "Is this true?"}
+    await message.answer(f"{text}\n\n{q_text[lang]}", reply_markup=markup)
+
+@dp.callback_query_handler(lambda c: c.data.startswith('quiz_'))
+async def check_quiz(callback: types.CallbackQuery):
+    data = callback.data.split('_')
+    user_choice = int(data[1])
+    correct_answer = int(data[2])
+    
+    if user_choice == correct_answer:
+        await callback.answer("To'g'ri! 🎉", show_alert=True)
     else:
-        for r in rows[-3:]: # Oxirgi 3 tasini chiqaradi
-            await message.answer(f"⭐ {r[0]}", parse_mode="Markdown")
+        await callback.answer("Xato! 🧐", show_alert=True)
+    await callback.message.delete()
+    await quiz_mode(callback.message)
 
-# --- 8. ISHGA TUSHIRISH ---
-async def on_startup(dp):
-    asyncio.create_task(start_web_server())
-
-if __name__ == "__main__":
-    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
