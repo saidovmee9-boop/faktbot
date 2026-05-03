@@ -3,19 +3,22 @@ import sqlite3
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import *
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from openai import OpenAI
 
-# =========================
-# 🔑 HARD-CODE FALLBACK (ENV shart EMAS)
-# =========================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "PASTE_YOUR_TOKEN_HERE"
-PORT = int(os.getenv("PORT") or 10000)
+# ======================
+# 🔑 TOKENS (ENV OR HARD)
+# ======================
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "PASTE_BOT_TOKEN"
+OPENAI_KEY = os.getenv("OPENAI_API_KEY") or "PASTE_OPENAI_KEY"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
 
-# =========================
+client = OpenAI(api_key=OPENAI_KEY)
+
+# ======================
 # DB
-# =========================
+# ======================
 def db():
     return sqlite3.connect("bot.db")
 
@@ -26,17 +29,9 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY AUTOINCREMENT, cat TEXT, uz TEXT, ru TEXT, en TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER, UNIQUE(uid,fid))")
 
-        if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
-            sample = []
-            for i in range(1, 21):
-                sample.append(("science", f"Suv fakt {i}", f"Факт вода {i}", f"Water fact {i}"))
-                sample.append(("tech", f"Tech fakt {i}", f"Тех факт {i}", f"Tech fact {i}"))
-                sample.append(("history", f"Tarix fakt {i}", f"История {i}", f"History fact {i}"))
-            c.executemany("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", sample)
-
-# =========================
+# ======================
 # LANG
-# =========================
+# ======================
 def get_lang(uid):
     with db() as conn:
         r = conn.execute("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
@@ -46,48 +41,81 @@ def set_lang(uid, l):
     with db() as conn:
         conn.execute("INSERT OR REPLACE INTO users VALUES (?,?)", (uid, l))
 
-STR = {
-    "uz": {"save":"❤️ Saqlash","saved":"❤️ Saqlanganlar","lang":"🌐 Til","empty":"Bo'sh"},
-    "ru": {"save":"❤️ Сохранить","saved":"❤️ Избранное","lang":"🌐 Язык","empty":"Пусто"},
-    "en": {"save":"❤️ Save","saved":"❤️ Saved","lang":"🌐 Language","empty":"Empty"}
-}
+# ======================
+# AI FACT (OPENAI 1.3.5 FIXED)
+# ======================
+def ai_fact(cat):
+    try:
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Give 1 short {cat} fact in Uzbek|Russian|English format separated by |"
+                }
+            ]
+        )
 
-# =========================
-# STATE (prev/next)
-# =========================
-state = {}
+        text = res.choices[0].message.content.split("|")
 
+        return (
+            cat,
+            text[0].strip(),
+            text[1].strip(),
+            text[2].strip()
+        )
+
+    except:
+        # fallback (bot NEVER crashes)
+        return (cat, "AI fakt", "AI факт", "AI fact")
+
+# ======================
+# FACTS
+# ======================
 def load(cat):
     with db() as conn:
         rows = conn.execute("SELECT * FROM facts WHERE cat=?", (cat,)).fetchall()
+
+        if not rows:
+            new = ai_fact(cat)
+            conn.execute("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", new)
+            rows = conn.execute("SELECT * FROM facts WHERE cat=?", (cat,)).fetchall()
+
         return rows
 
 def get_text(row, lang):
     return row[2] if lang=="uz" else row[3] if lang=="ru" else row[4]
 
-# =========================
+# ======================
+# STATE
+# ======================
+state = {}
+
+# ======================
 # MENU
-# =========================
-def menu(uid):
+# ======================
+def menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔬 Science","💻 Tech","📜 History")
     kb.add("🎲 Random","❤️ Saved")
-    kb.add("🌐 Til")
     return kb
 
-# =========================
+# ======================
 # SHOW FACT
-# =========================
+# ======================
 async def show(call, uid):
-    st = state[uid]
+    st = state.get(uid)
+    if not st:
+        return
+
     row = st["facts"][st["i"]]
     lang = get_lang(uid)
 
     kb = InlineKeyboardMarkup().row(
-        InlineKeyboardButton("⬅️",callback_data="prev"),
-        InlineKeyboardButton("➡️",callback_data="next")
+        InlineKeyboardButton("⬅️", callback_data="prev"),
+        InlineKeyboardButton("➡️", callback_data="next")
     ).add(
-        InlineKeyboardButton(STR[lang]["save"], callback_data=f"save_{row[0]}")
+        InlineKeyboardButton("❤️ Save", callback_data=f"save_{row[0]}")
     )
 
     await call.message.edit_text(
@@ -95,17 +123,17 @@ async def show(call, uid):
         reply_markup=kb
     )
 
-# =========================
+# ======================
 # START
-# =========================
+# ======================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     set_lang(m.from_user.id,"uz")
-    await m.answer("🚀 Bot tayyor", reply_markup=menu(m.from_user.id))
+    await m.answer("🚀 Bot tayyor", reply_markup=menu())
 
-# =========================
-# CATEGORY
-# =========================
+# ======================
+# MAIN
+# ======================
 @dp.message_handler()
 async def main(m: types.Message):
     uid = m.from_user.id
@@ -115,28 +143,32 @@ async def main(m: types.Message):
     elif "Tech" in t: cat="tech"
     elif "History" in t: cat="history"
     elif "Random" in t: cat="science"
-    elif "Saved" in t: return await show_saved(m)
     else: return
 
     facts = load(cat)
 
-    if not facts:
-        return await m.answer("No facts")
-
-    state[uid] = {"facts":facts,"i":0,"cat":cat}
+    state[uid] = {
+        "facts": facts,
+        "i": 0,
+        "cat": cat
+    }
 
     row = facts[0]
+    lang = get_lang(uid)
 
     kb = InlineKeyboardMarkup().row(
         InlineKeyboardButton("⬅️",callback_data="prev"),
         InlineKeyboardButton("➡️",callback_data="next")
     )
 
-    await m.answer(f"📚 {cat.upper()}\n\n{get_text(row,get_lang(uid))}", reply_markup=kb)
+    await m.answer(
+        f"📚 {cat.upper()}\n\n{get_text(row,lang)}",
+        reply_markup=kb
+    )
 
-# =========================
-# NAVIGATION
-# =========================
+# ======================
+# NAV
+# ======================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
@@ -151,9 +183,9 @@ async def nav(c):
 
     await show(c, uid)
 
-# =========================
+# ======================
 # SAVE
-# =========================
+# ======================
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
     fid = c.data.split("_")[1]
@@ -161,28 +193,9 @@ async def save(c):
         conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",(c.from_user.id,fid))
     await c.answer("❤️ Saved!")
 
-# =========================
-# SAVED
-# =========================
-async def show_saved(m):
-    uid = m.from_user.id
-    lang = get_lang(uid)
-
-    with db() as conn:
-        rows = conn.execute(
-            "SELECT f.* FROM facts f JOIN saved s ON f.id=s.fid WHERE s.uid=?",
-            (uid,)
-        ).fetchall()
-
-    if not rows:
-        return await m.answer(STR[lang]["empty"])
-
-    for r in rows:
-        await m.answer("❤️ " + get_text(r,lang))
-
-# =========================
-# RUN
-# =========================
+# ======================
+# RUN (RENDER SAFE)
+# ======================
 if __name__ == "__main__":
     init_db()
     executor.start_polling(dp, skip_updates=True)
