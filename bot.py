@@ -6,14 +6,13 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from openai import OpenAI
 
 # ======================
-# 🔑 TOKENS (ENV OR HARD)
+# TOKENS (NO ENV REQUIRED)
 # ======================
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "PASTE_BOT_TOKEN"
-OPENAI_KEY = os.getenv("OPENAI_API_KEY") or "PASTE_OPENAI_KEY"
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "PUT_TOKEN_HERE"
+OPENAI_KEY = os.getenv("OPENAI_API_KEY") or "PUT_OPENAI_KEY_HERE"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
-
 client = OpenAI(api_key=OPENAI_KEY)
 
 # ======================
@@ -29,6 +28,15 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY AUTOINCREMENT, cat TEXT, uz TEXT, ru TEXT, en TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER, UNIQUE(uid,fid))")
 
+        # demo facts
+        if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
+            demo = [
+                ("science","Suv 100°C da qaynaydi","Вода кипит при 100°C","Water boils at 100°C"),
+                ("tech","Internet global tarmoq","Интернет глобальная сеть","Internet is global network"),
+                ("history","Rim imperiyasi katta edi","Римская империя была большой","Roman empire was large")
+            ]
+            c.executemany("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", demo)
+
 # ======================
 # LANG
 # ======================
@@ -42,35 +50,30 @@ def set_lang(uid, l):
         conn.execute("INSERT OR REPLACE INTO users VALUES (?,?)", (uid, l))
 
 # ======================
-# AI FACT (OPENAI 1.3.5 FIXED)
+# AI FACT (SAFE)
 # ======================
 def ai_fact(cat):
     try:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Give 1 short {cat} fact in Uzbek|Russian|English format separated by |"
-                }
-            ]
+            messages=[{
+                "role":"user",
+                "content":f"1 short {cat} fact in format uz|ru|en"
+            }]
         )
 
-        text = res.choices[0].message.content.split("|")
+        parts = res.choices[0].message.content.split("|")
 
-        return (
-            cat,
-            text[0].strip(),
-            text[1].strip(),
-            text[2].strip()
-        )
+        if len(parts) < 3:
+            raise Exception("bad AI output")
+
+        return (cat, parts[0].strip(), parts[1].strip(), parts[2].strip())
 
     except:
-        # fallback (bot NEVER crashes)
         return (cat, "AI fakt", "AI факт", "AI fact")
 
 # ======================
-# FACTS
+# FACT LOAD
 # ======================
 def load(cat):
     with db() as conn:
@@ -129,7 +132,7 @@ async def show(call, uid):
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     set_lang(m.from_user.id,"uz")
-    await m.answer("🚀 Bot tayyor", reply_markup=menu())
+    await m.answer("🚀 Bot ishga tushdi", reply_markup=menu())
 
 # ======================
 # MAIN
@@ -157,8 +160,8 @@ async def main(m: types.Message):
     lang = get_lang(uid)
 
     kb = InlineKeyboardMarkup().row(
-        InlineKeyboardButton("⬅️",callback_data="prev"),
-        InlineKeyboardButton("➡️",callback_data="next")
+        InlineKeyboardButton("⬅️", callback_data="prev"),
+        InlineKeyboardButton("➡️", callback_data="next")
     )
 
     await m.answer(
@@ -167,14 +170,15 @@ async def main(m: types.Message):
     )
 
 # ======================
-# NAV
+# NAVIGATION
 # ======================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
+
     if not st:
-        return
+        return await c.answer("Start qiling /start", show_alert=True)
 
     if c.data == "next":
         st["i"] = (st["i"] + 1) % len(st["facts"])
@@ -189,12 +193,14 @@ async def nav(c):
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
     fid = c.data.split("_")[1]
+
     with db() as conn:
-        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",(c.from_user.id,fid))
+        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (c.from_user.id,fid))
+
     await c.answer("❤️ Saved!")
 
 # ======================
-# RUN (RENDER SAFE)
+# RUN
 # ======================
 if __name__ == "__main__":
     init_db()
