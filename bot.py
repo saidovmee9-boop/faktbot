@@ -15,7 +15,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 # =====================
-# DB (ONLY SAVED)
+# DB
 # =====================
 def db():
     return sqlite3.connect("bot.db")
@@ -27,60 +27,18 @@ def init_db():
 init_db()
 
 # =====================
-# FACTS (CLEAN + 10 EACH)
+# FACTS
 # =====================
 FACTS = {
-    "science": [
-        (1,"Inson DNKsi banan bilan o‘xshash"),
-        (2,"Miya uxlaganda ham ishlaydi"),
-        (3,"Suv kosmosda muzlaydi"),
-        (4,"Yurak 24/7 uradi"),
-        (5,"Odam 70% suv"),
-        (6,"Quyosh juda issiq"),
-        (7,"Bakteriyalar tanada bor"),
-        (8,"Yer aylanishda"),
-        (9,"Miya super kuchli"),
-        (10,"Koinot kengaymoqda")
-    ],
-    "tech": [
-        (11,"Internet harbiy loyiha edi"),
-        (12,"AI tez rivojlanadi"),
-        (13,"Telefon mini kompyuter"),
-        (14,"Kod dunyoni boshqaradi"),
-        (15,"Cloud saqlash tizimi"),
-        (16,"Serverlar 24/7 ishlaydi"),
-        (17,"Robotlar rivojlanmoqda"),
-        (18,"Apps millionlab"),
-        (19,"Cyber security muhim"),
-        (20,"Data juda qimmat")
-    ],
-    "history": [
-        (21,"Rim imperiyasi kuchli edi"),
-        (22,"Kleopatra mashhur malikasi"),
-        (23,"Vikinglar jangchi edi"),
-        (24,"Piramidalar sirli"),
-        (25,"Tarix juda boy"),
-        (26,"Urushlar bo‘lgan"),
-        (27,"Qirollar davri"),
-        (28,"Imperiyalar qulagan"),
-        (29,"Qadimiy shaharlar"),
-        (30,"O‘tmish qiziq")
-    ]
+    "science": [(1,"Inson DNKsi bananga o‘xshash"),(2,"Miya uxlaganda ham ishlaydi"),(3,"Suv muzlaydi")],
+    "tech": [(10,"Internet harbiy loyiha"),(11,"AI rivojlanadi"),(12,"Phone mini PC")],
+    "history": [(20,"Rim imperiyasi"),(21,"Kleopatra"),(22,"Vikinglar")]
 }
 
 # =====================
-# STATE + LANG
+# STATE
 # =====================
 state = {}
-lang = {}
-
-def get_lang(uid):
-    return lang.get(uid,"uz")
-
-def tr(text, l):
-    if l=="uz": return text
-    if l=="ru": return "🇷🇺 "+text
-    return "🇬🇧 "+text
 
 # =====================
 # MENU
@@ -100,36 +58,28 @@ async def show(uid, chat_id):
     i = st["i"]
 
     fact = FACTS[cat][i]
-    l = get_lang(uid)
 
     kb = InlineKeyboardMarkup()
     kb.row(
         InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
         InlineKeyboardButton("Next ➡️", callback_data="next")
     )
-    kb.add(
-        InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}")
-    )
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}"))
 
-    await bot.send_message(
-        chat_id,
-        f"📚 {cat.upper()}\n\n{tr(fact[1],l)}",
-        reply_markup=kb
-    )
+    await bot.send_message(chat_id, f"📚 {fact[1]}", reply_markup=kb)
 
 # =====================
 # START
 # =====================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    lang[m.from_user.id] = "uz"
-    await m.answer("🚀 Fact Bot", reply_markup=menu())
+    await m.answer("🚀 Bot ready", reply_markup=menu())
 
 # =====================
 # CATEGORY
 # =====================
 @dp.message_handler()
-async def handler(m):
+async def h(m):
     uid = m.from_user.id
     t = m.text
 
@@ -148,25 +98,24 @@ async def handler(m):
     await show(uid,m.chat.id)
 
 # =====================
-# NAV FIX (NO CRASH)
+# NAV FIX
 # =====================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
-
     if not st:
         return await c.answer("Start bot")
 
     if c.data=="next":
-        st["i"] = (st["i"]+1) % len(FACTS[st["cat"]])
+        st["i"]=(st["i"]+1)%len(FACTS[st["cat"]])
     else:
-        st["i"] = (st["i"]-1) % len(FACTS[st["cat"]])
+        st["i"]=(st["i"]-1)%len(FACTS[st["cat"]])
 
-    await show(uid, c.message.chat.id)
+    await show(uid,c.message.chat.id)
 
 # =====================
-# SAVE FIX (NO DUPLICATE LOSS)
+# SAVE FIX
 # =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
@@ -178,7 +127,7 @@ async def save(c):
     await c.answer("❤️ Saved")
 
 # =====================
-# SAVED FIX (FULL LIST)
+# SAVED FIX (FULL)
 # =====================
 @dp.message_handler(lambda m:"Saved" in m.text or "❤️" in m.text)
 async def saved(m):
@@ -202,24 +151,33 @@ async def saved(m):
     await m.answer(txt)
 
 # =====================
-# WEB SERVER (RENDER SAFE)
+# WEB SERVER (CRITICAL FIX)
 # =====================
-async def handle(r):
+async def handle(request):
     return web.Response(text="OK")
 
-async def web():
-    app=web.Application()
-    app.router.add_get("/",handle)
-    runner=web.AppRunner(app)
-    await runner.setup()
-    site=web.TCPSite(runner,"0.0.0.0",10000)
-    await site.start()
+def start_web():
+    app = web.Application()
+    app.router.add_get("/", handle)
 
+    runner = web.AppRunner(app)
+
+    async def _run():
+        await runner.setup()
+        site = web.TCPSite(runner, "0.0.0.0", int(os.getenv("PORT",10000)))
+        await site.start()
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(_run())
+
+# =====================
+# STARTUP FIX (NO CRASH)
+# =====================
 async def on_startup(dp):
-    asyncio.create_task(web())
+    start_web()
 
 # =====================
 # RUN
 # =====================
-if __name__=="__main__":
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
