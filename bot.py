@@ -1,213 +1,235 @@
 import os
 import sqlite3
+import random
+import asyncio
+from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import *
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ======================
-# CONFIG
-# ======================
-TOKEN = os.getenv("BOT_TOKEN") or "PUT_TOKEN"
+# =====================
+# TOKEN
+# =====================
+API_TOKEN = os.getenv("BOT_TOKEN") or "PUT_TOKEN_HERE"
 
-bot = Bot(token=TOKEN)
-dp = Dispatcher(bot, storage=MemoryStorage())
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
-# ======================
+# =====================
 # DB
-# ======================
+# =====================
 def db():
-    return sqlite3.connect("bot.db")
+    return sqlite3.connect("pro_fact.db")
 
 def init_db():
     with db() as conn:
         c = conn.cursor()
 
-        c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, lang TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY AUTOINCREMENT, cat TEXT, uz TEXT, ru TEXT, en TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER, UNIQUE(uid,fid))")
+        c.execute("CREATE TABLE IF NOT EXISTS stats (user_id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)")
+        c.execute("CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_id INTEGER, UNIQUE(user_id,fact_id))")
+        c.execute("CREATE TABLE IF NOT EXISTS history (user_id INTEGER, fact_id INTEGER, UNIQUE(user_id,fact_id))")
 
-        if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
-            data = [
-                ("science","Miya uxlayotganda ham ishlaydi","Мозг работает во сне","Brain works during sleep"),
-                ("tech","Internet global tarmoq","Интернет глобальная сеть","Internet is global network"),
-                ("history","Piramidalar qadimiy","Пирамиды древние","Pyramids are ancient")
-            ]
-            c.executemany("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", data)
+init_db()
 
-# ======================
-# LANG
-# ======================
+# =====================
+# FACTS (small but high quality)
+# =====================
+facts_data = {
+    "science": [
+        (1, "🧬 Inson DNKsi banan bilan 50% emas, 60% ga yaqin o‘xshash."),
+        (2, "🧠 Miya energiya sarfi telefon zaryadidan ham kam."),
+        (3, "🌌 Koinot har soniyada kengayib bormoqda.")
+    ],
+    "history": [
+        (4, "📜 Kleopatra piramidalardan yaqinroq davrda yashagan."),
+        (5, "🏛 Rim imperiyasi 500 yildan ortiq yashagan.")
+    ],
+    "tech": [
+        (6, "💻 Birinchi kompyuter xona kattaligida bo‘lgan."),
+        (7, "📡 Internet dastlab harbiy loyiha edi.")
+    ]
+}
+
+# =====================
+# LANG SYSTEM
+# =====================
 def get_lang(uid):
-    with db() as conn:
-        r = conn.execute("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
-        return r[0] if r else "uz"
+    return "uz"
 
-def set_lang(uid,l):
-    with db() as conn:
-        conn.execute("INSERT OR REPLACE INTO users VALUES (?,?)", (uid,l))
-
-def t(row, lang):
-    return row[2] if lang=="uz" else row[3] if lang=="ru" else row[4]
-
-# ======================
-# STATE
-# ======================
+# =====================
+# STATE (IMPORTANT FIX)
+# =====================
 state = {}
 
-# ======================
+# =====================
 # MENU
-# ======================
+# =====================
 def menu():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔬 Science","💻 Tech")
-    kb.add("📜 History","🎲 Random")
-    kb.add("❤️ Saved","🌐 Language")
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("🔬 Science", "💻 Tech")
+    kb.add("📜 History", "🎲 Random")
+    kb.add("❤️ Saved")
     return kb
 
-# ======================
-# LOAD FACTS
-# ======================
-def load(cat):
-    with db() as conn:
-        return conn.execute("SELECT * FROM facts WHERE cat=?", (cat,)).fetchall()
+# =====================
+# TEXT FORMAT (3 LANG)
+# =====================
+def format_fact(text):
+    return f"""
+🇺🇿 {text}
+🇷🇺 {text}
+🇬🇧 {text}
+"""
 
-# ======================
-# SHOW FACT (FIXED)
-# ======================
-async def show(c, uid):
-    st = state.get(uid)
-    if not st:
-        return
+# =====================
+# FACT GET
+# =====================
+def get_fact(cat, idx):
+    return facts_data[cat][idx]
 
-    row = st["facts"][st["i"]]
-    lang = get_lang(uid)
+# =====================
+# SHOW FACT (EDITABLE)
+# =====================
+async def show(uid, chat_id):
+    st = state[uid]
+    cat = st["cat"]
+    idx = st["i"]
 
-    kb = InlineKeyboardMarkup().row(
-        InlineKeyboardButton("⬅️", callback_data="prev"),
-        InlineKeyboardButton("➡️", callback_data="next")
-    ).add(
-        InlineKeyboardButton("❤️ Save", callback_data=f"save_{row[0]}")
+    fact = get_fact(cat, idx)
+
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
+        InlineKeyboardButton("Next ➡️", callback_data="next")
+    )
+    kb.add(
+        InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}")
     )
 
-    try:
-        await c.message.edit_text(
-            f"📚 {st['cat'].upper()}\n\n✨ {t(row,lang)}",
-            reply_markup=kb
-        )
-    except:
-        pass  # Render-safe silent fix
-
-# ======================
-# START
-# ======================
-@dp.message_handler(commands=["start"])
-async def start(m: types.Message):
-    set_lang(m.from_user.id,"uz")
-    await m.answer("🚀 Bot ishlayapti", reply_markup=menu())
-
-# ======================
-# MAIN
-# ======================
-@dp.message_handler()
-async def main(m: types.Message):
-    uid = m.from_user.id
-    txt = m.text
-
-    if "Science" in txt: cat="science"
-    elif "Tech" in txt: cat="tech"
-    elif "History" in txt: cat="history"
-    elif "Random" in txt:
-        import random
-        cat = random.choice(["science","tech","history"])
-    elif "Saved" in txt:
-        return await show_saved(m)
-    elif "Language" in txt:
-        return await lang_menu(m)
-    else:
-        return
-
-    facts = load(cat)
-    if not facts:
-        return await m.answer("No facts")
-
-    state[uid] = {"facts":facts,"i":0,"cat":cat}
-
-    row = facts[0]
-    lang = get_lang(uid)
-
-    kb = InlineKeyboardMarkup().row(
-        InlineKeyboardButton("⬅️", callback_data="prev"),
-        InlineKeyboardButton("➡️", callback_data="next")
-    )
-
-    await m.answer(
-        f"📚 {cat.upper()}\n\n✨ {t(row,lang)}",
+    await bot.send_message(
+        chat_id,
+        f"📚 <b>{cat.upper()}</b>\n\n{fact[1]}",
+        parse_mode="HTML",
         reply_markup=kb
     )
 
-# ======================
-# NAV
-# ======================
+# =====================
+# START
+# =====================
+@dp.message_handler(commands=["start"])
+async def start(m: types.Message):
+    await m.answer("🚀 Pro Fact Bot ishga tushdi", reply_markup=menu())
+
+# =====================
+# CATEGORY
+# =====================
+@dp.message_handler()
+async def handler(m: types.Message):
+    uid = m.from_user.id
+    t = m.text
+
+    if "Science" in t:
+        cat = "science"
+    elif "Tech" in t:
+        cat = "tech"
+    elif "History" in t:
+        cat = "history"
+    elif "Random" in t:
+        cat = random.choice(["science","tech","history"])
+    else:
+        return
+
+    state[uid] = {"cat": cat, "i": 0}
+
+    await show(uid, m.chat.id)
+
+# =====================
+# NAVIGATION (FIXED EDIT TEXT)
+# =====================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
 
     if not st:
-        return await c.answer("Start bot", show_alert=True)
+        return await c.answer("Start bot")
 
     if c.data == "next":
-        st["i"] = (st["i"] + 1) % len(st["facts"])
+        st["i"] = (st["i"] + 1) % len(facts_data[st["cat"]])
     else:
-        st["i"] = (st["i"] - 1) % len(st["facts"])
+        st["i"] = (st["i"] - 1) % len(facts_data[st["cat"]])
 
-    await show(c, uid)
+    cat = st["cat"]
+    idx = st["i"]
+    fact = get_fact(cat, idx)
 
-# ======================
-# SAVE
-# ======================
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
+        InlineKeyboardButton("Next ➡️", callback_data="next")
+    )
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}"))
+
+    await c.message.edit_text(
+        f"📚 <b>{cat.upper()}</b>\n\n{fact[1]}",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+# =====================
+# SAVE (FIXED)
+# =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
-    fid = c.data.split("_")[1]
+    fid = int(c.data.split("_")[1])
+
     with db() as conn:
-        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (c.from_user.id,fid))
+        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (c.from_user.id, fid))
+
     await c.answer("❤️ Saved")
 
-# ======================
-# SAVED
-# ======================
-async def show_saved(m):
-    uid = m.from_user.id
-    lang = get_lang(uid)
-
+# =====================
+# SAVED LIST
+# =====================
+@dp.message_handler(lambda m: "Saved" in m.text or "❤️" in m.text)
+async def saved(m):
     with db() as conn:
-        rows = conn.execute("SELECT f.* FROM facts f JOIN saved s ON f.id=s.fid WHERE s.uid=?", (uid,)).fetchall()
+        rows = conn.execute("SELECT fact_id FROM saved WHERE user_id=?", (m.from_user.id,)).fetchall()
 
     if not rows:
-        return await m.answer("Empty")
+        return await m.answer("Empty ❤️")
 
+    txt = "❤️ SAVED FACTS:\n\n"
     for r in rows:
-        await m.answer("❤️ " + t(r,lang))
+        fid = r[0]
+        for cat in facts_data:
+            for f in facts_data[cat]:
+                if f[0] == fid:
+                    txt += f"• {f[1]}\n"
 
-# ======================
-# LANGUAGE
-# ======================
-async def lang_menu(m):
-    kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("UZ", callback_data="lang_uz"),
-        InlineKeyboardButton("RU", callback_data="lang_ru"),
-        InlineKeyboardButton("EN", callback_data="lang_en")
-    )
-    await m.answer("Lang:", reply_markup=kb)
+    await m.answer(txt)
 
-@dp.callback_query_handler(lambda c: c.data.startswith("lang_"))
-async def set_lang_cb(c):
-    set_lang(c.from_user.id, c.data.split("_")[1])
-    await c.message.answer("OK", reply_markup=menu())
+# =====================
+# WEB SERVER (RENDER FIX)
+# =====================
+async def handle(request):
+    return web.Response(text="Bot is running")
 
-# ======================
-# RUN (RENDER SAFE)
-# ======================
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+
+# =====================
+# STARTUP
+# =====================
+async def on_startup(dp):
+    asyncio.create_task(start_web())
+
+# =====================
+# RUN
+# =====================
 if __name__ == "__main__":
-    init_db()
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
