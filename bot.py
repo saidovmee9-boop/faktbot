@@ -19,13 +19,8 @@ STRINGS = {
         "prev": "⬅️ Oldingi",
         "save": "💾 Saqlash",
         "saved": "🌟 Saqlanganlar",
-        "quiz": "🧠 Quiz",
         "rand": "🎲 Random",
         "lang": "🌐 Til",
-        "true": "✅ Rost",
-        "false": "❌ Yolg'on",
-        "correct": "🎯 To'g'ri!",
-        "wrong": "❌ Xato!",
         "empty": "Hech narsa yo'q"
     },
     "ru": {
@@ -34,13 +29,8 @@ STRINGS = {
         "prev": "⬅️ Назад",
         "save": "💾 Сохранить",
         "saved": "🌟 Избранное",
-        "quiz": "🧠 Викторина",
         "rand": "🎲 Рандом",
         "lang": "🌐 Язык",
-        "true": "✅ Правда",
-        "false": "❌ Ложь",
-        "correct": "🎯 Верно!",
-        "wrong": "❌ Ошибка!",
         "empty": "Пусто"
     },
     "en": {
@@ -49,13 +39,8 @@ STRINGS = {
         "prev": "⬅️ Prev",
         "save": "💾 Save",
         "saved": "🌟 Saved",
-        "quiz": "🧠 Quiz",
         "rand": "🎲 Random",
         "lang": "🌐 Language",
-        "true": "✅ True",
-        "false": "❌ False",
-        "correct": "🎯 Correct!",
-        "wrong": "❌ Wrong!",
         "empty": "Empty"
     }
 }
@@ -68,38 +53,18 @@ def init_db():
     with db() as conn:
         c = conn.cursor()
         c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, lang TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, cat TEXT, uz TEXT, ru TEXT, en TEXT, is_true INTEGER)")
+        c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, cat TEXT, uz TEXT, ru TEXT, en TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS history (uid INTEGER, fid INTEGER)")
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER)")
 
         if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
-            facts = []
-            for i in range(1, 51):
-                facts.append((
-                    "science",
-                    f"Fan fakt {i}",
-                    f"Научный факт {i}",
-                    f"Science fact {i}",
-                    i % 2
-                ))
-            for i in range(1, 51):
-                facts.append((
-                    "tech",
-                    f"Texnologiya fakt {i}",
-                    f"Тех факт {i}",
-                    f"Tech fact {i}",
-                    i % 2
-                ))
-            for i in range(1, 51):
-                facts.append((
-                    "history",
-                    f"Tarix fakt {i}",
-                    f"Исторический факт {i}",
-                    f"History fact {i}",
-                    i % 2
-                ))
+            data = []
+            for i in range(1, 101):
+                data.append(("science", f"Fan fakt {i}", f"Научный факт {i}", f"Science fact {i}"))
+                data.append(("tech", f"Texnologiya fakt {i}", f"Тех факт {i}", f"Tech fact {i}"))
+                data.append(("history", f"Tarix fakt {i}", f"Исторический факт {i}", f"History fact {i}"))
 
-            c.executemany("INSERT INTO facts (cat, uz, ru, en, is_true) VALUES (?,?,?,?,?)", facts)
+            c.executemany("INSERT INTO facts (cat, uz, ru, en) VALUES (?,?,?,?)", data)
 
 # --- HELPERS ---
 def get_lang(uid):
@@ -111,29 +76,29 @@ def set_lang(uid, l):
     with db() as conn:
         conn.execute("INSERT OR REPLACE INTO users (id, lang) VALUES (?,?)", (uid, l))
 
-def txt(fid, lang, row):
+def get_text(row, lang):
     return row[2] if lang == "uz" else row[3] if lang == "ru" else row[4]
 
-# --- KEYBOARD ---
+# --- MENU ---
 def menu(l):
     s = STRINGS[l]
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔬", "💻", "📜")
-    kb.add(s["quiz"], s["rand"], s["saved"])
+    kb.add("🔬 Science", "💻 Tech", "📜 History")
+    kb.add(s["rand"], s["saved"])
     kb.add(s["lang"])
     return kb
 
 def fact_kb(fid, cat, l):
     s = STRINGS[l]
     kb = InlineKeyboardMarkup()
-    kb.add(
+    kb.row(
         InlineKeyboardButton(s["prev"], callback_data=f"prev_{cat}"),
         InlineKeyboardButton(s["next"], callback_data=f"next_{cat}")
     )
     kb.add(InlineKeyboardButton(s["save"], callback_data=f"save_{fid}"))
     return kb
 
-# --- FACT ENGINE ---
+# --- FACT ---
 def get_fact(uid, cat):
     with db() as conn:
         q = "SELECT * FROM facts WHERE id NOT IN (SELECT fid FROM history WHERE uid=?)"
@@ -156,7 +121,7 @@ async def send_fact(m, uid, cat):
     with db() as conn:
         conn.execute("INSERT INTO history VALUES (?,?)", (uid, row[0]))
 
-    await m.answer(txt(row[0], lang, row), reply_markup=fact_kb(row[0], cat, lang))
+    await m.answer(get_text(row, lang), reply_markup=fact_kb(row[0], cat, lang))
 
 # --- HANDLERS ---
 @dp.message_handler(commands=["start"])
@@ -165,8 +130,8 @@ async def start(m: types.Message):
     l = get_lang(m.from_user.id)
     await m.answer(STRINGS[l]["hi"], reply_markup=menu(l))
 
-@dp.message_handler(lambda m: m.text == "🌐 Til" or m.text == "🌐 Язык" or m.text == "🌐 Language")
-async def change_lang(m):
+@dp.message_handler(lambda m: m.text in ["🌐 Til", "🌐 Язык", "🌐 Language"])
+async def lang_menu(m):
     kb = InlineKeyboardMarkup().add(
         InlineKeyboardButton("UZ", callback_data="lang_uz"),
         InlineKeyboardButton("RU", callback_data="lang_ru"),
@@ -180,10 +145,19 @@ async def set_language(c):
     set_lang(c.from_user.id, l)
     await c.message.answer("✅", reply_markup=menu(l))
 
-@dp.message_handler(lambda m: m.text in ["🔬","💻","📜","🎲 Random","🎲 Рандом"])
-async def cat(m):
-    cat = "science" if m.text == "🔬" else "tech" if m.text == "💻" else "history" if m.text == "📜" else "random"
-    await send_fact(m, m.from_user.id, cat)
+@dp.message_handler()
+async def main(m: types.Message):
+    text = m.text
+    if "Science" in text or text == "🔬":
+        await send_fact(m, m.from_user.id, "science")
+    elif "Tech" in text or text == "💻":
+        await send_fact(m, m.from_user.id, "tech")
+    elif "History" in text or text == "📜":
+        await send_fact(m, m.from_user.id, "history")
+    elif "Random" in text or "Рандом" in text:
+        await send_fact(m, m.from_user.id, "random")
+    elif "Saved" in text or "Избран" in text or "Saqlangan" in text:
+        await show_saved(m)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("next_"))
 async def next_f(c):
@@ -192,7 +166,8 @@ async def next_f(c):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("prev_"))
 async def prev_f(c):
-    await send_fact(c.message, c.from_user.id, c.data.split("_")[1])
+    cat = c.data.split("_")[1]
+    await send_fact(c.message, c.from_user.id, cat)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
@@ -201,38 +176,19 @@ async def save(c):
         conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (c.from_user.id, fid))
     await c.answer("Saved!")
 
-@dp.message_handler(lambda m: "Saved" in m.text or "Избран" in m.text or "Saqlangan" in m.text)
 async def show_saved(m):
     l = get_lang(m.from_user.id)
     with db() as conn:
-        rows = conn.execute("SELECT f.* FROM facts f JOIN saved s ON f.id=s.fid WHERE s.uid=?", (m.from_user.id,)).fetchall()
+        rows = conn.execute(
+            "SELECT f.* FROM facts f JOIN saved s ON f.id=s.fid WHERE s.uid=?",
+            (m.from_user.id,)
+        ).fetchall()
 
     if not rows:
         return await m.answer(STRINGS[l]["empty"])
 
     for r in rows:
-        await m.answer(txt(r[0], l, r))
-
-# --- QUIZ ---
-@dp.message_handler(lambda m: "Quiz" in m.text or "Викторина" in m.text)
-async def quiz(m):
-    l = get_lang(m.from_user.id)
-    with db() as conn:
-        f = conn.execute("SELECT * FROM facts ORDER BY RANDOM() LIMIT 1").fetchone()
-
-    kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton(STRINGS[l]["true"], callback_data=f"q_{f[5]}_1"),
-        InlineKeyboardButton(STRINGS[l]["false"], callback_data=f"q_{f[5]}_0"),
-    )
-
-    await m.answer(txt(f[0], l, f), reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("q_"))
-async def check(c):
-    l = get_lang(c.from_user.id)
-    _, real, user = c.data.split("_")
-    await c.answer(STRINGS[l]["correct"] if real == user else STRINGS[l]["wrong"], show_alert=True)
-    await quiz(c.message)
+        await m.answer(get_text(r, l))
 
 # --- SERVER ---
 async def on_startup(_):
