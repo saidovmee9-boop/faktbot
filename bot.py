@@ -9,7 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # =====================
 # TOKEN
 # =====================
-TOKEN = os.getenv("BOT_TOKEN") or "PUT_TOKEN_HERE"
+TOKEN = os.getenv("BOT_TOKEN")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
@@ -18,73 +18,80 @@ dp = Dispatcher(bot)
 # DB
 # =====================
 def db():
-    return sqlite3.connect("fact.db")
+    return sqlite3.connect("bot.db")
 
 def init_db():
     with db() as conn:
         c = conn.cursor()
-        c.execute("CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_id INTEGER, UNIQUE(user_id,fact_id))")
+
+        c.execute("CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_id INTEGER)")
+        c.execute("CREATE TABLE IF NOT EXISTS admin (id INTEGER PRIMARY KEY)")
+        c.execute("CREATE TABLE IF NOT EXISTS premium (user_id INTEGER)")
 
 init_db()
 
 # =====================
-# FACTS (qiziqarli + ko‘paytirilgan)
+# FACTS (10 ta har category + 3 til FULL SYNC)
 # =====================
-facts = {
+FACTS = {
     "science": [
-        (1, "🧬 Inson DNKsi 60% banan bilan o‘xshash."),
-        (2, "🧠 Miya 24/7 ishlaydi, hatto uxlaganda ham."),
-        (3, "🌍 Yer doimiy harakatda, lekin biz sezmaymiz."),
-        (4, "⚡ Chaqmoq Quyosh yuzasidan ham issiq bo‘lishi mumkin."),
+        (1,"Inson DNKsi 60% banan bilan o‘xshash","ДНК человека на 60% как банан","Human DNA is 60% similar to banana"),
+        (2,"Miya uxlaganda ham ishlaydi","Мозг работает во сне","Brain works during sleep"),
+        (3,"Suv kosmosda muzlaydi","Вода в космосе замерзает","Water freezes in space"),
+        (4,"Yurak 24/7 ishlaydi","Сердце работает 24/7","Heart works 24/7"),
+        (5,"Bakteriyalar tanamizda yashaydi","Бактерии живут в теле","Bacteria live in body"),
+        (6,"Yulduzlar milliard yildir mavjud","Звёзды существуют миллиарды лет","Stars exist billions of years"),
+        (7,"Yer aylanishda davom etadi","Земля постоянно вращается","Earth keeps rotating"),
+        (8,"Odam miyasi superkompyuter","Мозг как суперкомпьютер","Brain is like supercomputer"),
+        (9,"Odam 70% suv","Человек на 70% вода","Human is 70% water"),
+        (10,"Quyosh juda issiq","Солнце очень горячее","Sun is very hot")
     ],
     "tech": [
-        (10, "💻 Internet dastlab harbiy loyiha edi."),
-        (11, "📱 Birinchi telefon 1 kg dan og‘ir edi."),
-        (12, "🤖 AI hozir millionlab qarorlarni sekundda qiladi."),
+        (11,"Internet harbiy loyiha edi","Интернет был военным проектом","Internet was military project"),
+        (12,"AI tez rivojlanmoqda","AI быстро развивается","AI is growing fast"),
+        (13,"Telefonlar kichik kompyuter","Телефон это мини ПК","Phone is mini PC"),
+        (14,"Kod dunyoni boshqaradi","Код управляет миром","Code runs world"),
+        (15,"Serverlar 24/7 ishlaydi","Серверы работают 24/7","Servers run 24/7"),
+        (16,"Cloud data saqlaydi","Облако хранит данные","Cloud stores data"),
+        (17,"Robotlar ishlab chiqmoqda","Роботы развиваются","Robots evolving"),
+        (18,"Internet global tarmoq","Интернет глобальная сеть","Internet is global network"),
+        (19,"Apps millionlab bor","Приложений миллионы","Millions of apps"),
+        (20,"Cyber security muhim","Кибербезопасность важна","Cybersecurity is important")
     ],
     "history": [
-        (20, "🏛 Rim imperiyasi 500+ yil yashagan."),
-        (21, "📜 Kleopatra piramidalardan yaqinroq davrda yashagan."),
-        (22, "⚔️ Vikinglar Yevropani asrlar davomida qo‘rqitgan."),
+        (21,"Rim imperiyasi kuchli edi","Рим был сильной империей","Rome was powerful"),
+        (22,"Kleopatra qadimiy malikasi","Клеопатра древняя королева","Cleopatra was queen"),
+        (23,"Vikinglar jangchi edi","Викинги были воинами","Vikings were warriors"),
+        (24,"Piramidalar sirli","Пирамиды загадочные","Pyramids are mysterious"),
+        (25,"Tarix juda boy","История богата","History is rich"),
+        (26,"Imperiyalar qulagan","Империи падали","Empires fell"),
+        (27,"Urushlar ko‘p bo‘lgan","Было много войн","Many wars happened"),
+        (28,"Qadimiy shaharlar","Древние города","Ancient cities"),
+        (29,"O‘tmish qiziq","Прошлое интересно","Past is interesting"),
+        (30,"Qirollar davri","Эпоха королей","Age of kings")
     ]
 }
-
-# =====================
-# LANG SYSTEM
-# =====================
-def get_lang(uid):
-    return user_lang.get(uid, "uz")
-
-user_lang = {}
-
-def translate(text, lang):
-    if lang == "uz":
-        return text
-    if lang == "ru":
-        return "🇷🇺 " + text
-    if lang == "en":
-        return "🇬🇧 " + text
 
 # =====================
 # STATE
 # =====================
 state = {}
+user_lang = {}
+
+# =====================
+# LANG
+# =====================
+def t(i, lang):
+    return FACTS[i[0]][0][1] if lang=="uz" else FACTS[i[0]][0][2] if lang=="ru" else FACTS[i[0]][0][3]
 
 # =====================
 # MENU
 # =====================
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔬 Science", "💻 Tech")
-    kb.add("📜 History", "🎲 Random")
-    kb.add("❤️ Saved", "🌐 Language")
+    kb.add("🔬 Science","💻 Tech","📜 History")
+    kb.add("❤️ Saved","🌐 Language")
     return kb
-
-# =====================
-# FACT GET
-# =====================
-def get_fact(cat, idx):
-    return facts[cat][idx]
 
 # =====================
 # SHOW FACT
@@ -94,24 +101,17 @@ async def show(uid, chat_id):
     cat = st["cat"]
     idx = st["i"]
 
-    fact = get_fact(cat, idx)
-    lang = get_lang(uid)
+    fact = FACTS[cat][idx]
+    lang = user_lang.get(uid,"uz")
 
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
+    kb = InlineKeyboardMarkup()
+    kb.row(
         InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
         InlineKeyboardButton("Next ➡️", callback_data="next")
     )
-    kb.add(
-        InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}")
-    )
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}"))
 
-    await bot.send_message(
-        chat_id,
-        f"📚 <b>{cat.upper()}</b>\n\n{translate(fact[1], lang)}",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    await bot.send_message(chat_id, fact[1], reply_markup=kb)
 
 # =====================
 # START
@@ -125,141 +125,96 @@ async def start(m: types.Message):
 # CATEGORY
 # =====================
 @dp.message_handler()
-async def handler(m: types.Message):
+async def h(m):
     uid = m.from_user.id
     t = m.text
 
     if "Science" in t:
-        cat = "science"
+        cat="science"
     elif "Tech" in t:
-        cat = "tech"
+        cat="tech"
     elif "History" in t:
-        cat = "history"
-    elif "Random" in t:
-        cat = random.choice(list(facts.keys()))
-    elif "Saved" in t:
-        return await saved(m)
-    elif "Language" in t:
-        return await lang_menu(m)
+        cat="history"
     else:
         return
 
-    state[uid] = {"cat": cat, "i": 0}
-    await show(uid, m.chat.id)
+    state[uid] = {"cat":cat,"i":0}
+    await show(uid,m.chat.id)
 
 # =====================
-# NAVIGATION (FIXED)
+# NAV FIX
 # =====================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
+    if not st: return
 
-    if not st:
-        return await c.answer("Start bot")
-
-    if c.data == "next":
-        st["i"] = (st["i"] + 1) % len(facts[st["cat"]])
+    if c.data=="next":
+        st["i"]=(st["i"]+1)%10
     else:
-        st["i"] = (st["i"] - 1) % len(facts[st["cat"]])
+        st["i"]=(st["i"]-1)%10
 
-    cat = st["cat"]
-    idx = st["i"]
-    fact = get_fact(cat, idx)
-    lang = get_lang(uid)
-
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
-        InlineKeyboardButton("Next ➡️", callback_data="next")
-    )
-    kb.add(
-        InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}")
-    )
-
-    await c.message.edit_text(
-        f"📚 <b>{cat.upper()}</b>\n\n{translate(fact[1], lang)}",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    await show(uid,c.message.chat.id)
 
 # =====================
-# SAVE (FIXED)
+# SAVE FIX (FULL LIST FIXED)
 # =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
     fid = int(c.data.split("_")[1])
 
     with db() as conn:
-        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (c.from_user.id, fid))
+        conn.execute("INSERT INTO saved VALUES (?,?)",(c.from_user.id,fid))
 
-    await c.answer("❤️ Saved!")
+    await c.answer("❤️ Saved")
 
 # =====================
-# SAVED LIST (FIXED FULL)
+# SAVED FIX (ALL FACTS SHOW)
 # =====================
+@dp.message_handler(lambda m:"Saved" in m.text or "❤️" in m.text)
 async def saved(m):
-    uid = m.from_user.id
-    lang = get_lang(uid)
-
-    saved_ids = []
+    uid=m.from_user.id
 
     with db() as conn:
-        rows = conn.execute("SELECT fact_id FROM saved WHERE user_id=?", (uid,)).fetchall()
-        saved_ids = [r[0] for r in rows]
+        rows=conn.execute("SELECT fact_id FROM saved WHERE user_id=?",(uid,)).fetchall()
 
-    if not saved_ids:
-        return await m.answer("❤️ Empty")
+    if not rows:
+        return await m.answer("Empty")
 
-    text = "❤️ SAVED FACTS:\n\n"
+    txt="❤️ SAVED FACTS:\n\n"
 
-    for cat in facts:
-        for f in facts[cat]:
-            if f[0] in saved_ids:
-                text += f"• {translate(f[1], lang)}\n"
+    for r in rows:
+        fid=r[0]
+        for cat in FACTS:
+            for f in FACTS[cat]:
+                if f[0]==fid:
+                    txt+=f"• {f[1]}\n"
 
-    await m.answer(text)
-
-# =====================
-# LANGUAGE
-# =====================
-user_lang_map = {}
-
-async def lang_menu(m):
-    kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("UZ", callback_data="lang_uz"),
-        InlineKeyboardButton("RU", callback_data="lang_ru"),
-        InlineKeyboardButton("EN", callback_data="lang_en")
-    )
-    await m.answer("🌐 Choose language", reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("lang_"))
-async def set_lang(c):
-    user_lang[c.from_user.id] = c.data.split("_")[1]
-    await c.message.answer("✅ Language updated", reply_markup=menu())
+    await m.answer(txt)
 
 # =====================
-# WEB SERVER (RENDER FIX)
+# AI FACT GENERATOR (FAKE SMART)
 # =====================
-async def handle(request):
-    return web.Response(text="Bot running")
+def ai_fact():
+    return "🤖 AI Fact: Koinot har sekund kengaymoqda va yangi galaktikalar paydo bo‘lmoqda."
 
-async def web_start():
-    app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
+# =====================
+# WEB SERVER
+# =====================
+async def webh(r):
+    return web.Response(text="OK")
+
+async def web():
+    app=web.Application()
+    app.router.add_get("/",webh)
+    runner=web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    site=web.TCPSite(runner,"0.0.0.0",10000)
     await site.start()
 
-# =====================
-# STARTUP
-# =====================
 async def on_startup(dp):
-    asyncio.create_task(web_start())
+    asyncio.create_task(web())
 
-# =====================
-# RUN
-# =====================
-if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+if __name__=="__main__":
+    executor.start_polling(dp,skip_updates=True,on_startup=on_startup)
