@@ -1,121 +1,125 @@
 import os
 import sqlite3
-import random
 import asyncio
+import random
 from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ===================== DB =====================
+ADMIN_ID = 123456789  # o'zingni id
+
+# ================= DB =================
 def db():
     return sqlite3.connect("bot.db")
 
 def init_db():
-    with db() as conn:
-        c = conn.cursor()
-        c.execute("CREATE TABLE IF NOT EXISTS saved (user_id INTEGER, fact_id INTEGER)")
-        c.execute("CREATE TABLE IF NOT EXISTS stats (user_id INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)")
+    with db() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, text TEXT)")
+        c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, premium INTEGER DEFAULT 0)")
+        c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, text TEXT)")
 init_db()
 
-# ===================== FACTS (10 TA HAR BO‘LIM) =====================
+# ================= FACTS =================
 FACTS = {
     "science": [
-        (1,"Inson DNKsi bananga o‘xshash","ДНК похож на банан","DNA is similar to banana"),
-        (2,"Miya uxlaganda ham ishlaydi","Мозг работает во сне","Brain works during sleep"),
-        (3,"Suv kosmosda muzlaydi","Вода в космосе замерзает","Water freezes in space"),
-        (4,"Yurak 24/7 uradi","Сердце работает 24/7","Heart works 24/7"),
-        (5,"Odam 70% suv","Человек 70% вода","Human is 70% water"),
-        (6,"Quyosh juda issiq","Солнце очень горячее","Sun is very hot"),
-        (7,"Bakteriyalar tanada bor","Бактерии в теле","Bacteria in body"),
-        (8,"Yer aylanadi","Земля вращается","Earth rotates"),
-        (9,"Miya super kuchli","Мозг мощный","Brain is powerful"),
-        (10,"Koinot kengaymoqda","Вселенная расширяется","Universe expands")
+        "Inson DNKsi bananga o‘xshaydi",
+        "Miya uxlaganda ham ishlaydi",
+        "Suv kosmosda muzlaydi",
+        "Yurak 24/7 ishlaydi",
+        "Odam 70% suv",
+        "Bakteriyalar tanada bor",
+        "Yer aylanadi",
+        "Miya juda kuchli",
+        "Koinot kengayadi",
+        "Tana energiya ishlab chiqaradi"
     ],
     "tech": [
-        (11,"Internet harbiy loyiha","Интернет военный проект","Internet was military"),
-        (12,"AI tez rivojlanadi","AI развивается","AI is evolving"),
-        (13,"Telefon mini kompyuter","Телефон мини ПК","Phone is mini PC"),
-        (14,"Kod dunyoni boshqaradi","Код управляет миром","Code runs world"),
-        (15,"Cloud tizimlar","Облачные системы","Cloud systems"),
-        (16,"Server 24/7 ishlaydi","Сервер 24/7","Server runs 24/7"),
-        (17,"Robotlar rivojlanadi","Роботы развиваются","Robots evolve"),
-        (18,"Apps millionlab","Приложений миллионы","Millions of apps"),
-        (19,"Cyber xavfsizlik muhim","Кибербезопасность важна","Cybersecurity matters"),
-        (20,"Data juda qimmat","Данные дорогие","Data is valuable")
+        "Internet harbiy loyiha edi",
+        "AI tez rivojlanadi",
+        "Telefon mini kompyuter",
+        "Kod dunyoni boshqaradi",
+        "Cloud tizim mavjud",
+        "Serverlar 24/7",
+        "Robotlar rivojlanadi",
+        "Apps juda ko‘p",
+        "Cyber security muhim",
+        "Data juda qimmat"
     ],
     "history": [
-        (21,"Rim imperiyasi kuchli","Рим сильный","Rome was powerful"),
-        (22,"Kleopatra malikasi","Клеопатра","Cleopatra queen"),
-        (23,"Vikinglar jangchi","Викинги воины","Vikings warriors"),
-        (24,"Piramidalar sirli","Пирамиды тайна","Pyramids mystery"),
-        (25,"Tarix boy","История богатая","History rich"),
-        (26,"Urushlar bo‘lgan","Войны были","Wars happened"),
-        (27,"Qirollar davri","Эпоха королей","Age of kings"),
-        (28,"Imperiyalar qulagan","Империи пали","Empires fell"),
-        (29,"Qadimiy shaharlar","Древние города","Ancient cities"),
-        (30,"O‘tmish qiziq","Прошлое интересно","Past is interesting")
-    ],
-    "ai": [
-        (31,"AI insondan tez fikrlaydi","ИИ быстрее человека","AI thinks faster than humans"),
-        (32,"AI millionlab data o‘rganadi","ИИ учится на данных","AI learns from data"),
-        (33,"AI kelajak texnologiya","ИИ будущее","AI is future tech"),
-        (34,"AI yozadi va o‘qiydi","ИИ пишет и читает","AI writes and reads"),
-        (35,"AI xatolarni topadi","ИИ находит ошибки","AI finds errors"),
-        (36,"AI tibbiyotda ishlatiladi","ИИ в медицине","AI used in medicine"),
-        (37,"AI avtomobil boshqaradi","ИИ управляет авто","AI drives cars"),
-        (38,"AI tarjima qiladi","ИИ переводит","AI translates"),
-        (39,"AI chatbotlar asosida","ИИ чатботы","AI chatbots"),
-        (40,"AI o‘rganadi doim","ИИ всегда учится","AI always learns")
+        "Rim imperiyasi kuchli edi",
+        "Kleopatra mashhur",
+        "Vikinglar jangchi",
+        "Piramidalar sirli",
+        "Tarix boy",
+        "Urushlar bo‘lgan",
+        "Qirollar davri",
+        "Imperiyalar qulagan",
+        "Qadimiy shaharlar",
+        "O‘tmish qiziq"
     ]
 }
 
-# ===================== STATE =====================
+# ================= AI FAKE GENERATOR =================
+def ai_fact():
+    templates = [
+        "🤖 {a} sababli {b} bo‘ladi",
+        "🤖 Agar {a} bo‘lsa, {b} yuz beradi",
+        "🤖 Ilmiy jihatdan {a} {b} bilan bog‘liq",
+        "🤖 Tadqiqotlarga ko‘ra {a} juda muhim"
+    ]
+
+    a = random.choice([
+        "inson miyasi", "koinot", "AI", "atomlar", "energiya", "tabiat"
+    ])
+    b = random.choice([
+        "rivojlanish", "harakat", "o‘zgarish", "texnologiya", "hayot"
+    ])
+
+    return random.choice(templates).format(a=a, b=b)
+
+# ================= STATE =================
 state = {}
-lang = {}
 
-def tr(row, l):
-    if l == "uz": return row[1]
-    if l == "ru": return row[2]
-    return row[3]
-
-# ===================== MENU =====================
+# ================= MENU =================
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🔬 Science","💻 Tech")
-    kb.add("📜 History","🤖 AI Facts")
+    kb.add("📜 History","🤖 AI Fact")
     kb.add("❤️ Saved","📊 Stats")
+    kb.add("💎 Premium","🛠 Admin")
     return kb
 
-# ===================== SHOW =====================
+# ================= SHOW =================
 async def show(uid, chat_id):
     st = state[uid]
     cat = st["cat"]
     i = st["i"]
 
     fact = FACTS[cat][i]
-    l = lang.get(uid,"uz")
 
     kb = InlineKeyboardMarkup()
     kb.row(
         InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
         InlineKeyboardButton("Next ➡️", callback_data="next")
     )
-    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save_{fact[0]}"))
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data="save"))
 
-    await bot.send_message(chat_id, tr(fact,l), reply_markup=kb)
+    await bot.send_message(chat_id, fact, reply_markup=kb)
 
-# ===================== START =====================
+# ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    lang[m.from_user.id] = "uz"
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO users VALUES (?,0)", (m.from_user.id,))
     await m.answer("🚀 Fact Bot Ready", reply_markup=menu())
 
-# ===================== CATEGORY =====================
+# ================= CATEGORY =================
 @dp.message_handler()
 async def h(m):
     uid = m.from_user.id
@@ -124,19 +128,27 @@ async def h(m):
     if "Science" in t: cat="science"
     elif "Tech" in t: cat="tech"
     elif "History" in t: cat="history"
-    elif "AI" in t: cat="ai"
-    elif "Saved" in t: return await saved(m)
-    elif "Stats" in t: return await stats(m)
-    else: return
+    elif "AI Fact" in t:
+        return await m.answer(ai_fact())
+    elif "Saved" in t:
+        return await saved(m)
+    elif "Stats" in t:
+        return await stats(m)
+    elif "Premium" in t:
+        return await premium(m)
+    elif "Admin" in t:
+        return await admin(m)
+    else:
+        return
 
     state[uid] = {"cat":cat,"i":0}
     await show(uid,m.chat.id)
 
-# ===================== NAV =====================
-@dp.callback_query_handler(lambda c: c.data in ["next","prev"])
+# ================= NAV =================
+@dp.callback_query_handler(lambda c:c.data in ["next","prev"])
 async def nav(c):
-    uid = c.from_user.id
-    st = state.get(uid)
+    uid=c.from_user.id
+    st=state.get(uid)
     if not st: return
 
     if c.data=="next":
@@ -146,61 +158,90 @@ async def nav(c):
 
     await show(uid,c.message.chat.id)
 
-# ===================== SAVE FIX =====================
-@dp.callback_query_handler(lambda c: c.data.startswith("save_"))
+# ================= SAVE =================
+@dp.callback_query_handler(lambda c:c.data=="save")
 async def save(c):
-    fid = int(c.data.split("_")[1])
-
     with db() as conn:
-        conn.execute("INSERT INTO saved VALUES (?,?)",(c.from_user.id,fid))
-
+        conn.execute("INSERT INTO saved VALUES (?,?)",(c.from_user.id,c.message.text))
     await c.answer("❤️ Saved")
 
-# ===================== SAVED FULL FIX =====================
+# ================= SAVED =================
 @dp.message_handler(lambda m:"Saved" in m.text)
 async def saved(m):
-    uid=m.from_user.id
-
-    with db() as conn:
-        rows=conn.execute("SELECT fact_id FROM saved WHERE user_id=?",(uid,)).fetchall()
+    with db() as c:
+        rows=c.execute("SELECT text FROM saved WHERE uid=?",(m.from_user.id,)).fetchall()
 
     if not rows:
         return await m.answer("Empty")
 
-    txt="❤️ SAVED FACTS:\n\n"
-
+    txt="❤️ SAVED:\n\n"
     for r in rows:
-        fid=r[0]
-        for cat in FACTS:
-            for f in FACTS[cat]:
-                if f[0]==fid:
-                    txt+=f"• {f[1]}\n"
+        txt+=f"• {r[0]}\n"
 
     await m.answer(txt)
 
-# ===================== STATS =====================
+# ================= STATS =================
 @dp.message_handler(lambda m:"Stats" in m.text)
 async def stats(m):
-    uid=m.from_user.id
-    with db() as conn:
-        c=conn.execute("SELECT COUNT(*) FROM saved WHERE user_id=?",(uid,)).fetchone()[0]
-    await m.answer(f"📊 Saved: {c}")
+    with db() as c:
+        count=c.execute("SELECT COUNT(*) FROM saved WHERE uid=?",(m.from_user.id,)).fetchone()[0]
+    await m.answer(f"📊 Saved: {count}")
 
-# ===================== WEB (RENDER SAFE) =====================
+# ================= PREMIUM =================
+@dp.message_handler(lambda m:"Premium" in m.text)
+async def premium(m):
+    with db() as c:
+        c.execute("UPDATE users SET premium=1 WHERE id=?",(m.from_user.id,))
+    await m.answer("💎 Premium activated")
+
+# ================= ADMIN =================
+@dp.message_handler(lambda m:"Admin" in m.text)
+async def admin(m):
+    if m.from_user.id!=ADMIN_ID:
+        return await m.answer("No access")
+
+    kb=types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("➕ Add Fact","📢 Post Channel")
+    await m.answer("Admin panel",reply_markup=kb)
+
+# ================= ADD FACT =================
+@dp.message_handler(lambda m:"Add Fact" in m.text)
+async def add(m):
+    if m.from_user.id!=ADMIN_ID: return
+
+    fact=ai_fact()
+
+    with db() as c:
+        c.execute("INSERT INTO facts (text) VALUES (?)",(fact,))
+
+    await m.answer("Added ✔️")
+
+# ================= CHANNEL POST =================
+@dp.message_handler(commands=["post"])
+async def post(m):
+    if m.from_user.id!=ADMIN_ID: return
+
+    fact=ai_fact()
+    await bot.send_message(CHANNEL_ID,"📢 FACT\n\n"+fact)
+    await m.answer("Posted")
+
+# ================= WEB FIX =================
 async def handle(r):
     return web.Response(text="OK")
 
 async def web():
     app=web.Application()
     app.router.add_get("/",handle)
+
     runner=web.AppRunner(app)
     await runner.setup()
+
     site=web.TCPSite(runner,"0.0.0.0",int(os.getenv("PORT",10000)))
     await site.start()
 
 async def on_startup(dp):
     asyncio.create_task(web())
 
-# ===================== RUN =====================
+# ================= RUN =================
 if __name__=="__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
