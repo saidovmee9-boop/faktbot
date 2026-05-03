@@ -114,13 +114,13 @@ def get_stat(uid):
         r = c.execute("SELECT count FROM stats WHERE uid=?", (uid,)).fetchone()
         return r[0] if r else 0
 
-# ================= SHOW =================
+# ================= SHOW (FIXED) =================
 async def show(uid, chat_id, edit=False):
     st = state[uid]
     cat = st["cat"]
     i = st["i"]
 
-    # 🔥 AI MIX
+    # AI MIX
     if random.random() < 0.4:
         fact = generate_ai_fact()
     else:
@@ -135,12 +135,13 @@ async def show(uid, chat_id, edit=False):
     )
     kb.add(InlineKeyboardButton("❤️ Save", callback_data="save"))
 
-    if edit:
+    # 🔥 FIXED EDIT LOGIC
+    if edit and st.get("msg_id"):
         try:
             await bot.edit_message_text(
                 text,
                 chat_id,
-                state[uid]["msg_id"],
+                st["msg_id"],
                 reply_markup=kb
             )
             return
@@ -148,14 +149,14 @@ async def show(uid, chat_id, edit=False):
             pass
 
     msg = await bot.send_message(chat_id, text, reply_markup=kb)
-    state[uid]["msg_id"] = msg.message_id
+    st["msg_id"] = msg.message_id
 
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     await m.answer("🚀 Ultimate Fact Bot", reply_markup=menu())
 
-# ================= CATEGORY =================
+# ================= CATEGORY (FIXED) =================
 @dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"])
 async def cat_handler(m):
     uid = m.from_user.id
@@ -167,14 +168,21 @@ async def cat_handler(m):
     else:
         cat = "history"
 
-    state[uid] = {"cat":cat,"i":0}
-    await show(uid, m.chat.id)
+    # 🔥 HAR BO‘LIM UCHUN YANGI STATE
+    state[uid] = {
+        "cat": cat,
+        "i": 0,
+        "msg_id": None
+    }
 
-# ================= NAV =================
+    await show(uid, m.chat.id, edit=False)
+
+# ================= NAV (FIXED) =================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
+
     if not st:
         return await c.answer()
 
@@ -184,6 +192,7 @@ async def nav(c):
         st["i"] = (st["i"] - 1) % len(FACTS[st["cat"]])
 
     add_stat(uid)
+
     await show(uid, c.message.chat.id, edit=True)
     await c.answer()
 
