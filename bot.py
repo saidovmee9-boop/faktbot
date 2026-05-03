@@ -27,8 +27,8 @@ STRINGS = {
         "hi": "🌟 Добро пожаловать!",
         "next": "➡️ Далее",
         "prev": "⬅️ Назад",
-        "save": "❤️ Saqlash",
-        "saved": "❤️ Saqlanganlar",
+        "save": "❤️ Сохранить",
+        "saved": "❤️ Избранное",
         "rand": "🎲 Рандом",
         "lang": "🌐 Язык",
         "empty": "Пусто"
@@ -37,8 +37,8 @@ STRINGS = {
         "hi": "🌟 Welcome!",
         "next": "➡️ Next",
         "prev": "⬅️ Prev",
-        "save": "❤️ Saqlash",
-        "saved": "❤️ Saqlanganlar",
+        "save": "❤️ Save",
+        "saved": "❤️ Saved",
         "rand": "🎲 Random",
         "lang": "🌐 Language",
         "empty": "Empty"
@@ -52,38 +52,18 @@ def db():
 def init_db():
     with db() as conn:
         c = conn.cursor()
-
         c.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, lang TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS facts (id INTEGER PRIMARY KEY, cat TEXT, uz TEXT, ru TEXT, en TEXT)")
         c.execute("CREATE TABLE IF NOT EXISTS history (uid INTEGER, fid INTEGER)")
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER)")
 
         if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
-
-            facts = [
-                # SCIENCE
-                ("science","Inson miyasi tanadagi eng murakkab organ.","Мозг — самый сложный орган.","The brain is the most complex organ."),
-                ("science","Suv 100°C da qaynaydi.","Вода кипит при 100°C.","Water boils at 100°C."),
-                ("science","Yer Quyosh atrofida aylanadi.","Земля вращается вокруг Солнца.","Earth orbits the Sun."),
-                ("science","DNA insonning genetik kodi.","ДНК — генетический код человека.","DNA carries genetic code."),
-                ("science","Yorug'lik tezligi eng tezdir.","Скорость света самая высокая.","Light is the fastest."),
-
-                # TECH
-                ("tech","Internet 1960-yillarda yaratilgan.","Интернет создан в 1960-х.","Internet was created in 1960s."),
-                ("tech","Birinchi kompyuter juda katta edi.","Первый компьютер был огромным.","First computer was huge."),
-                ("tech","Python mashhur dasturlash tili.","Python популярный язык.","Python is a popular language."),
-                ("tech","Smartfonlar mini kompyuter hisoblanadi.","Смартфоны — мини ПК.","Smartphones are mini computers."),
-                ("tech","AI tez rivojlanmoqda.","ИИ быстро развивается.","AI is growing fast."),
-
-                # HISTORY
-                ("history","Misr piramidalari qadimiydir.","Пирамиды Египта древние.","Egypt pyramids are ancient."),
-                ("history","Rim imperiyasi katta bo'lgan.","Римская империя была огромной.","Roman Empire was huge."),
-                ("history","Ikkinchi jahon urushi 1945 da tugagan.","Вторая мировая закончилась в 1945.","WW2 ended in 1945."),
-                ("history","Buyuk ipak yo‘li mavjud bo‘lgan.","Был Шёлковый путь.","Silk Road existed."),
-                ("history","Amir Temur buyuk sarkarda.","Тамерлан великий полководец.","Tamerlane was a great commander."),
-            ]
-
-            c.executemany("INSERT INTO facts (cat, uz, ru, en) VALUES (?,?,?,?)", facts)
+            data = []
+            for i in range(1, 101):
+                data.append(("science", f"Fan fakt {i}", f"Научный факт {i}", f"Science fact {i}"))
+                data.append(("tech", f"Texnologiya fakt {i}", f"Тех факт {i}", f"Tech fact {i}"))
+                data.append(("history", f"Tarix fakt {i}", f"Исторический факт {i}", f"History fact {i}"))
+            c.executemany("INSERT INTO facts (cat, uz, ru, en) VALUES (?,?,?,?)", data)
 
 # --- HELPERS ---
 def get_lang(uid):
@@ -98,12 +78,24 @@ def set_lang(uid, l):
 def get_text(row, lang):
     return row[2] if lang=="uz" else row[3] if lang=="ru" else row[4]
 
+def get_saved_count(uid):
+    with db() as conn:
+        return conn.execute("SELECT COUNT(*) FROM saved WHERE uid=?", (uid,)).fetchone()[0]
+
+def get_last_two(uid):
+    with db() as conn:
+        return conn.execute(
+            "SELECT f.* FROM facts f JOIN history h ON f.id=h.fid WHERE h.uid=? ORDER BY ROWID DESC LIMIT 2",
+            (uid,)
+        ).fetchall()
+
 # --- MENU ---
-def menu(l):
+def menu(uid, l):
     s = STRINGS[l]
+    count = get_saved_count(uid)
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔬 Science","💻 Tech","📜 History")
-    kb.add(s["rand"], s["saved"])
+    kb.add("🔬 Science", "💻 Tech", "📜 History")
+    kb.add(s["rand"], f"{s['saved']} ({count})")
     kb.add(s["lang"])
     return kb
 
@@ -122,11 +114,11 @@ def get_fact(uid, cat):
     with db() as conn:
         q = "SELECT * FROM facts WHERE id NOT IN (SELECT fid FROM history WHERE uid=?)"
         p = [uid]
-        if cat!="random":
+        if cat != "random":
             q += " AND cat=?"
             p.append(cat)
         q += " ORDER BY RANDOM() LIMIT 1"
-        return conn.execute(q,p).fetchone()
+        return conn.execute(q, p).fetchone()
 
 async def send_fact(m, uid, cat):
     lang = get_lang(uid)
@@ -138,16 +130,20 @@ async def send_fact(m, uid, cat):
         row = get_fact(uid, cat)
 
     with db() as conn:
-        conn.execute("INSERT INTO history VALUES (?,?)",(uid,row[0]))
+        conn.execute("INSERT INTO history VALUES (?,?)", (uid, row[0]))
 
-    await m.answer(get_text(row,lang), reply_markup=fact_kb(row[0],cat,lang))
+    await m.answer(
+        f"📚 <b>{cat.upper()}</b>\n\n📌 {get_text(row,lang)}",
+        parse_mode="HTML",
+        reply_markup=fact_kb(row[0],cat,lang)
+    )
 
 # --- HANDLERS ---
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     set_lang(m.from_user.id,"uz")
     l = get_lang(m.from_user.id)
-    await m.answer(STRINGS[l]["hi"], reply_markup=menu(l))
+    await m.answer(STRINGS[l]["hi"], reply_markup=menu(m.from_user.id,l))
 
 @dp.message_handler(lambda m: m.text in ["🌐 Til","🌐 Язык","🌐 Language"])
 async def lang_menu(m):
@@ -162,7 +158,7 @@ async def lang_menu(m):
 async def set_language(c):
     l = c.data.split("_")[1]
     set_lang(c.from_user.id,l)
-    await c.message.answer("✅", reply_markup=menu(l))
+    await c.message.answer("✅", reply_markup=menu(c.from_user.id,l))
 
 @dp.message_handler()
 async def main(m: types.Message):
@@ -184,14 +180,23 @@ async def next_f(c):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("prev_"))
 async def prev_f(c):
-    await send_fact(c.message,c.from_user.id,c.data.split("_")[1])
+    rows = get_last_two(c.from_user.id)
+    if len(rows) < 2:
+        return await c.answer("❗ Oldingi yo'q")
+    row = rows[1]
+    lang = get_lang(c.from_user.id)
+    await c.message.answer(
+        f"📚 <b>{c.data.split('_')[1].upper()}</b>\n\n📌 {get_text(row,lang)}",
+        parse_mode="HTML",
+        reply_markup=fact_kb(row[0],c.data.split("_")[1],lang)
+    )
 
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
     fid = c.data.split("_")[1]
     with db() as conn:
         conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",(c.from_user.id,fid))
-    await c.answer("Saved!")
+    await c.answer("❤️ Saved!")
 
 async def show_saved(m):
     l = get_lang(m.from_user.id)
@@ -202,7 +207,7 @@ async def show_saved(m):
         return await m.answer(STRINGS[l]["empty"])
 
     for r in rows:
-        await m.answer(get_text(r,l))
+        await m.answer("❤️ " + get_text(r,l))
 
 # --- SERVER ---
 async def on_startup(_):
