@@ -16,8 +16,19 @@ def db():
 
 def init_db():
     with db() as c:
-        c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, text TEXT)")
-        c.execute("CREATE TABLE IF NOT EXISTS stats (uid INTEGER PRIMARY KEY, count INTEGER DEFAULT 0)")
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS saved (
+            uid INTEGER,
+            text TEXT,
+            UNIQUE(uid, text)
+        )
+        """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS stats (
+            uid INTEGER PRIMARY KEY,
+            count INTEGER DEFAULT 0
+        )
+        """)
 init_db()
 
 # ================= FACTS =================
@@ -66,7 +77,7 @@ def get_stat(uid):
         r = c.execute("SELECT count FROM stats WHERE uid=?", (uid,)).fetchone()
         return r[0] if r else 0
 
-# ================= SHOW FACT =================
+# ================= SHOW =================
 async def show(uid, chat_id, edit=False):
     st = state[uid]
     cat = st["cat"]
@@ -102,7 +113,7 @@ async def show(uid, chat_id, edit=False):
 async def start(m: types.Message):
     await m.answer("🚀 Fact Bot Ready", reply_markup=menu())
 
-# ================= CATEGORY FIX =================
+# ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"])
 async def cat_handler(m):
     uid = m.from_user.id
@@ -117,7 +128,7 @@ async def cat_handler(m):
     state[uid] = {"cat":cat,"i":0}
     await show(uid, m.chat.id)
 
-# ================= NAV (FIXED EDIT) =================
+# ================= NAV =================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
@@ -134,20 +145,24 @@ async def nav(c):
     await show(uid, c.message.chat.id, edit=True)
     await c.answer()
 
-# ================= SAVE =================
+# ================= SAVE (FIXED) =================
 @dp.callback_query_handler(lambda c: c.data == "save")
 async def save(c):
-    with db() as conn:
-        conn.execute("INSERT INTO saved VALUES (?,?)",
-                     (c.from_user.id, c.message.text))
-    await c.answer("❤️ Saved")
+    try:
+        with db() as conn:
+            conn.execute(
+                "INSERT INTO saved VALUES (?,?)",
+                (c.from_user.id, c.message.text)
+            )
+        await c.answer("❤️ Saved")
+    except:
+        await c.answer("❗ Already saved")
 
 # ================= SAVED =================
 @dp.message_handler(lambda m: "Saved" in m.text or "❤️" in m.text)
 async def saved(m):
     with db() as c:
-        rows = c.execute("SELECT text FROM saved WHERE uid=?",
-                         (m.from_user.id,)).fetchall()
+        rows = c.execute("SELECT text FROM saved WHERE uid=?", (m.from_user.id,)).fetchall()
 
     if not rows:
         return await m.answer("Empty")
@@ -161,7 +176,7 @@ async def stats(m):
     count = get_stat(m.from_user.id)
     await m.answer(f"📊 Ko‘rilgan faktlar: {count}")
 
-# ================= WEB (RENDER SAFE) =================
+# ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
 
