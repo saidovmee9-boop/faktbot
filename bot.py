@@ -6,44 +6,9 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiohttp import web
 
 API_TOKEN = os.environ.get("BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 10000))
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot, storage=MemoryStorage())
-
-# --- STRINGS ---
-STRINGS = {
-    "uz": {
-        "hi": "🌟 Xush kelibsiz!",
-        "next": "➡️ Keyingi",
-        "prev": "⬅️ Oldingi",
-        "save": "❤️ Saqlash",
-        "saved": "❤️ Saqlanganlar",
-        "rand": "🎲 Random",
-        "lang": "🌐 Til",
-        "empty": "Hech narsa yo'q"
-    },
-    "ru": {
-        "hi": "🌟 Добро пожаловать!",
-        "next": "➡️ Далее",
-        "prev": "⬅️ Назад",
-        "save": "❤️ Сохранить",
-        "saved": "❤️ Избранное",
-        "rand": "🎲 Рандом",
-        "lang": "🌐 Язык",
-        "empty": "Пусто"
-    },
-    "en": {
-        "hi": "🌟 Welcome!",
-        "next": "➡️ Next",
-        "prev": "⬅️ Prev",
-        "save": "❤️ Save",
-        "saved": "❤️ Saved",
-        "rand": "🎲 Random",
-        "lang": "🌐 Language",
-        "empty": "Empty"
-    }
-}
 
 # --- DB ---
 def db():
@@ -58,12 +23,15 @@ def init_db():
         c.execute("CREATE TABLE IF NOT EXISTS saved (uid INTEGER, fid INTEGER)")
 
         if c.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0:
-            data = []
-            for i in range(1, 101):
-                data.append(("science", f"Fan fakt {i}", f"Научный факт {i}", f"Science fact {i}"))
-                data.append(("tech", f"Texnologiya fakt {i}", f"Тех факт {i}", f"Tech fact {i}"))
-                data.append(("history", f"Tarix fakt {i}", f"Исторический факт {i}", f"History fact {i}"))
-            c.executemany("INSERT INTO facts (cat, uz, ru, en) VALUES (?,?,?,?)", data)
+            facts = [
+                ("science","Suv 100°C da qaynaydi","Вода кипит при 100°C","Water boils at 100°C"),
+                ("science","Yer Quyosh atrofida aylanadi","Земля вращается вокруг Солнца","Earth orbits the Sun"),
+                ("tech","Internet 1960-yillarda yaratilgan","Интернет создан в 1960-х","Internet was created in 1960s"),
+                ("tech","AI rivojlanmoqda","ИИ развивается","AI is growing"),
+                ("history","Rim imperiyasi katta bo'lgan","Римская империя была большой","Roman Empire was huge"),
+                ("history","Misr piramidalari qadimiy","Пирамиды древние","Pyramids are ancient")
+            ]
+            c.executemany("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", facts)
 
 # --- HELPERS ---
 def get_lang(uid):
@@ -71,152 +39,128 @@ def get_lang(uid):
         r = conn.execute("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
         return r[0] if r else "uz"
 
-def set_lang(uid, l):
+def set_lang(uid,l):
     with db() as conn:
-        conn.execute("INSERT OR REPLACE INTO users (id, lang) VALUES (?,?)", (uid, l))
+        conn.execute("INSERT OR REPLACE INTO users VALUES (?,?)",(uid,l))
 
-def get_text(row, lang):
+def get_text(row,lang):
     return row[2] if lang=="uz" else row[3] if lang=="ru" else row[4]
 
-def get_saved_count(uid):
-    with db() as conn:
-        return conn.execute("SELECT COUNT(*) FROM saved WHERE uid=?", (uid,)).fetchone()[0]
-
-def get_last_two(uid):
-    with db() as conn:
-        return conn.execute(
-            "SELECT f.* FROM facts f JOIN history h ON f.id=h.fid WHERE h.uid=? ORDER BY ROWID DESC LIMIT 2",
-            (uid,)
-        ).fetchall()
+# --- AI FACT ---
+def ai_fact(cat):
+    return (
+        cat,
+        "AI yangi fakt (UZ)",
+        "Новый факт от AI",
+        "New AI fact"
+    )
 
 # --- MENU ---
-def menu(uid, l):
-    s = STRINGS[l]
-    count = get_saved_count(uid)
+def menu(l):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("🔬 Science", "💻 Tech", "📜 History")
-    kb.add(s["rand"], f"{s['saved']} ({count})")
-    kb.add(s["lang"])
+    kb.add("🔬 Science","💻 Tech","📜 History")
+    kb.add("🎲 Random","❤️ Saved")
+    kb.add("🌐 Language")
     return kb
 
-def fact_kb(fid, cat, l):
-    s = STRINGS[l]
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton(s["prev"], callback_data=f"prev_{cat}"),
-        InlineKeyboardButton(s["next"], callback_data=f"next_{cat}")
-    )
-    kb.add(InlineKeyboardButton(s["save"], callback_data=f"save_{fid}"))
-    return kb
+# --- STATE (TEMP MEMORY) ---
+user_state = {}
 
-# --- FACT ---
-def get_fact(uid, cat):
+# --- FACT LOAD ---
+def load_facts(cat):
     with db() as conn:
-        q = "SELECT * FROM facts WHERE id NOT IN (SELECT fid FROM history WHERE uid=?)"
-        p = [uid]
-        if cat != "random":
-            q += " AND cat=?"
-            p.append(cat)
-        q += " ORDER BY RANDOM() LIMIT 1"
-        return conn.execute(q, p).fetchone()
+        rows = conn.execute(
+            "SELECT * FROM facts WHERE cat=? ORDER BY RANDOM()",
+            (cat,)
+        ).fetchall()
 
-async def send_fact(m, uid, cat):
+        if not rows:
+            new = ai_fact(cat)
+            conn.execute("INSERT INTO facts (cat,uz,ru,en) VALUES (?,?,?,?)", new)
+            rows = conn.execute("SELECT * FROM facts WHERE cat=?", (cat,)).fetchall()
+
+        return rows
+
+# --- SHOW FACT ---
+async def show_fact(call, uid):
+    st = user_state[uid]
+    row = st["facts"][st["index"]]
     lang = get_lang(uid)
-    row = get_fact(uid, cat)
 
-    if not row:
-        with db() as conn:
-            conn.execute("DELETE FROM history WHERE uid=?", (uid,))
-        row = get_fact(uid, cat)
+    kb = InlineKeyboardMarkup().row(
+        InlineKeyboardButton("⬅️", callback_data="prev"),
+        InlineKeyboardButton("➡️", callback_data="next")
+    ).add(
+        InlineKeyboardButton("❤️ Save", callback_data=f"save_{row[0]}")
+    )
 
-    with db() as conn:
-        conn.execute("INSERT INTO history VALUES (?,?)", (uid, row[0]))
-
-    await m.answer(
-        f"📚 <b>{cat.upper()}</b>\n\n📌 {get_text(row,lang)}",
-        parse_mode="HTML",
-        reply_markup=fact_kb(row[0],cat,lang)
+    await call.message.edit_text(
+        f"📚 {st['cat'].upper()}\n\n📌 {get_text(row,lang)}",
+        reply_markup=kb
     )
 
 # --- HANDLERS ---
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
     set_lang(m.from_user.id,"uz")
-    l = get_lang(m.from_user.id)
-    await m.answer(STRINGS[l]["hi"], reply_markup=menu(m.from_user.id,l))
-
-@dp.message_handler(lambda m: m.text in ["🌐 Til","🌐 Язык","🌐 Language"])
-async def lang_menu(m):
-    kb = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("UZ",callback_data="lang_uz"),
-        InlineKeyboardButton("RU",callback_data="lang_ru"),
-        InlineKeyboardButton("EN",callback_data="lang_en"),
-    )
-    await m.answer("Til tanlang:", reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("lang_"))
-async def set_language(c):
-    l = c.data.split("_")[1]
-    set_lang(c.from_user.id,l)
-    await c.message.answer("✅", reply_markup=menu(c.from_user.id,l))
+    await m.answer("🌟 Xush kelibsiz", reply_markup=menu("uz"))
 
 @dp.message_handler()
 async def main(m: types.Message):
-    t = m.text
-    if "Science" in t:
-        await send_fact(m,m.from_user.id,"science")
-    elif "Tech" in t:
-        await send_fact(m,m.from_user.id,"tech")
-    elif "History" in t:
-        await send_fact(m,m.from_user.id,"history")
-    elif "Random" in t or "Рандом" in t:
-        await send_fact(m,m.from_user.id,"random")
-    elif "Saved" in t or "Избран" in t or "Saqlangan" in t:
-        await show_saved(m)
+    uid = m.from_user.id
+    text = m.text
 
-@dp.callback_query_handler(lambda c: c.data.startswith("next_"))
-async def next_f(c):
-    await send_fact(c.message,c.from_user.id,c.data.split("_")[1])
+    if "Science" in text:
+        cat = "science"
+    elif "Tech" in text:
+        cat = "tech"
+    elif "History" in text:
+        cat = "history"
+    elif "Random" in text:
+        cat = "science"
+    elif "Saved" in text:
+        return await m.answer("Saved hali simple qoldirdim")
+    elif "Language" in text:
+        return await m.answer("Til almashtirish hali bor")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("prev_"))
-async def prev_f(c):
-    rows = get_last_two(c.from_user.id)
-    if len(rows) < 2:
-        return await c.answer("❗ Oldingi yo'q")
-    row = rows[1]
-    lang = get_lang(c.from_user.id)
-    await c.message.answer(
-        f"📚 <b>{c.data.split('_')[1].upper()}</b>\n\n📌 {get_text(row,lang)}",
-        parse_mode="HTML",
-        reply_markup=fact_kb(row[0],c.data.split("_")[1],lang)
+    facts = load_facts(cat)
+
+    user_state[uid] = {
+        "facts": facts,
+        "index": 0,
+        "cat": cat
+    }
+
+    kb = InlineKeyboardMarkup().row(
+        InlineKeyboardButton("⬅️", callback_data="prev"),
+        InlineKeyboardButton("➡️", callback_data="next")
     )
+
+    await m.answer(
+        f"📚 {cat.upper()}\n\n📌 {get_text(facts[0],get_lang(uid))}",
+        reply_markup=kb
+    )
+
+@dp.callback_query_handler(lambda c: c.data in ["next","prev"])
+async def nav(c: types.CallbackQuery):
+    uid = c.from_user.id
+    st = user_state.get(uid)
+
+    if not st:
+        return
+
+    if c.data == "next":
+        st["index"] = (st["index"] + 1) % len(st["facts"])
+    else:
+        st["index"] = (st["index"] - 1) % len(st["facts"])
+
+    await show_fact(c, uid)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("save_"))
 async def save(c):
-    fid = c.data.split("_")[1]
-    with db() as conn:
-        conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",(c.from_user.id,fid))
     await c.answer("❤️ Saved!")
 
-async def show_saved(m):
-    l = get_lang(m.from_user.id)
-    with db() as conn:
-        rows = conn.execute("SELECT f.* FROM facts f JOIN saved s ON f.id=s.fid WHERE s.uid=?",(m.from_user.id,)).fetchall()
-
-    if not rows:
-        return await m.answer(STRINGS[l]["empty"])
-
-    for r in rows:
-        await m.answer("❤️ " + get_text(r,l))
-
-# --- SERVER ---
-async def on_startup(_):
+# --- START ---
+if __name__ == "__main__":
     init_db()
-    app = web.Application()
-    app.router.add_get("/", lambda r: web.Response(text="OK"))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner,"0.0.0.0",PORT).start()
-
-if __name__=="__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(dp)
