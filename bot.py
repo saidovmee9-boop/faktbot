@@ -398,6 +398,38 @@ async def cat_handler(m):
 
     await show(uid, m.chat.id)
 
+
+
+@dp.message_handler(lambda m: m.text == "❤️ Saved")
+async def saved(m: types.Message):
+    with db() as c:
+        rows = c.execute(
+            "SELECT text FROM saved WHERE uid=? ORDER BY rowid DESC LIMIT 20",
+            (m.from_user.id,)
+        ).fetchall()
+
+    if not rows:
+        return await m.answer("Hech narsa saqlanmagan")
+
+    text = "❤️ Saved facts:\n\n" + "\n\n".join(r[0] for r in rows)
+
+    await m.answer(text)
+
+
+
+@dp.message_handler(lambda m: m.text == "📊 Stats")
+async def stats(m: types.Message):
+    with db() as c:
+        row = c.execute(
+            "SELECT count FROM stats WHERE uid=?",
+            (m.from_user.id,)
+        ).fetchone()
+
+    count = row[0] if row else 0
+
+    await m.answer(f"📊 Siz saqlagan faktlar soni: {count}")
+
+
 # ================= NAV =================
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
@@ -413,11 +445,19 @@ async def nav(c):
 async def save(c):
     try:
         with db() as conn:
-            conn.execute("INSERT INTO saved VALUES (?,?)",
+            conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",
                          (c.from_user.id, c.message.text))
+
+            conn.execute("""
+                INSERT INTO stats(uid, count)
+                VALUES(?, 1)
+                ON CONFLICT(uid) DO UPDATE SET count = count + 1
+            """, (c.from_user.id,))
+
         await c.answer("❤️ Saved")
     except:
-        await c.answer("❗ Already saved")
+        await c.answer("❗ Error")
+
 
 # ================= GROUP ADD =================
 @dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
