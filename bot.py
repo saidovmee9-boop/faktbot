@@ -296,49 +296,34 @@ def generate_ai_fact():
 def get_unique_fact_user(uid, cat):
     with db() as c:
         seen = set(r[0] for r in c.execute(
-            "SELECT fact FROM user_seen WHERE uid=?", (uid,)
+            "SELECT fact FROM user_seen WHERE uid=?",
+            (uid,)
         ))
 
+    # faqat o‘z kategoriyasi
     pool = FACTS[cat][:]
 
-    for _ in range(20):
-        pool.append(generate_ai_fact())
-
     random.shuffle(pool)
 
     for fact in pool:
         if fact[0] not in seen:
             with db() as c:
-                c.execute("INSERT OR IGNORE INTO user_seen VALUES (?,?)", (uid, fact[0]))
+                c.execute(
+                    "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
+                    (uid, fact[0])
+                )
             return fact
 
-    return generate_ai_fact()
-
-def get_unique_facts_group(gid, count=10):
-    with db() as c:
-        seen = set(r[0] for r in c.execute(
-            "SELECT fact FROM group_seen WHERE gid=?", (gid,)
-        ))
-
-    pool = []
-    for cat in FACTS:
-        pool.extend(FACTS[cat] * 3)
-
-    for _ in range(100):
-        pool.append(generate_ai_fact())
-
-    random.shuffle(pool)
-
-    result = []
-    for fact in pool:
+    # fallback (faqat shu category AI)
+    while True:
+        fact = generate_ai_fact()
         if fact[0] not in seen:
-            result.append(fact)
             with db() as c:
-                c.execute("INSERT OR IGNORE INTO group_seen VALUES (?,?)", (gid, fact[0]))
-        if len(result) == count:
-            break
-
-    return result
+                c.execute(
+                    "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
+                    (uid, fact[0])
+                )
+            return fact
 
 # ================= MENU =================
 def menu():
@@ -419,15 +404,24 @@ async def saved(m: types.Message):
 
 @dp.message_handler(lambda m: m.text == "📊 Stats")
 async def stats(m: types.Message):
+    uid = m.from_user.id
+
     with db() as c:
-        row = c.execute(
-            "SELECT count FROM stats WHERE uid=?",
-            (m.from_user.id,)
-        ).fetchone()
+        saved_count = c.execute(
+            "SELECT COUNT(*) FROM saved WHERE uid=?",
+            (uid,)
+        ).fetchone()[0]
 
-    count = row[0] if row else 0
+        seen_count = c.execute(
+            "SELECT COUNT(*) FROM user_seen WHERE uid=?",
+            (uid,)
+        ).fetchone()[0]
 
-    await m.answer(f"📊 Siz saqlagan faktlar soni: {count}")
+    await m.answer(
+        f"📊 Statistika:\n\n"
+        f"❤️ Saved faktlar: {saved_count}\n"
+        f"👁 Ko‘rilgan faktlar: {seen_count}"
+    )
 
 
 # ================= NAV =================
