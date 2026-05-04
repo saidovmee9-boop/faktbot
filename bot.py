@@ -458,11 +458,20 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
-    scheduler.add_job(send_daily, "cron", hour=8, minute=0)
+    # har kuni 08:00 Tashkent vaqti
+    scheduler.add_job(
+        send_daily,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        id="daily_facts",
+        replace_existing=True
+    )
+
     scheduler.start()
 
     asyncio.create_task(web_app())
     
 # ================= RUN =================
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=lambda dp: scheduler.shutdown())
