@@ -337,13 +337,21 @@ def menu():
 state = {}
 
 # ================= SHOW =================
-async def show(uid, chat_id, edit=False):
+async def show(uid, chat_id, new_fact=None, edit=False):
     st = state[uid]
     cat = st["cat"]
 
-    fact = get_unique_fact_user(uid, cat)
+    if new_fact is None:
+        new_fact = get_unique_fact_user(uid, cat)
 
-    text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+    # agar yangi fact kelsa stackga qo‘shamiz
+    if st["current"]:
+        st["back"].append(st["current"])
+
+    st["current"] = new_fact
+    st["forward"].clear()
+
+    text = f"🇺🇿 {new_fact[0]}\n🇷🇺 {new_fact[1]}\n🇬🇧 {new_fact[2]}"
 
     kb = InlineKeyboardMarkup()
     kb.row(
@@ -353,11 +361,8 @@ async def show(uid, chat_id, edit=False):
     kb.add(InlineKeyboardButton("❤️ Save", callback_data="save"))
 
     if edit and st.get("msg_id"):
-        try:
-            await bot.edit_message_text(text, chat_id, st["msg_id"], reply_markup=kb)
-            return
-        except:
-            pass
+        await bot.edit_message_text(text, chat_id, st["msg_id"], reply_markup=kb)
+        return
 
     msg = await bot.send_message(chat_id, text, reply_markup=kb)
     st["msg_id"] = msg.message_id
@@ -379,7 +384,13 @@ async def cat_handler(m):
     else:
         cat = "history"
 
-    state[uid] = {"cat": cat, "msg_id": None}
+    state[uid] = {
+    "cat": cat,
+    "msg_id": None,
+    "current": None,
+    "back": [],
+    "forward": []
+}
 
     await show(uid, m.chat.id)
 
@@ -428,10 +439,47 @@ async def stats(m: types.Message):
 @dp.callback_query_handler(lambda c: c.data in ["next","prev"])
 async def nav(c):
     uid = c.from_user.id
-    if uid not in state:
+    st = state.get(uid)
+
+    if not st:
         return await c.answer()
 
-    await show(uid, c.message.chat.id, edit=True)
+    # NEXT
+    if c.data == "next":
+        if st["forward"]:
+            fact = st["forward"].pop()
+            st["back"].append(st["current"])
+            st["current"] = fact
+        else:
+            fact = get_unique_fact_user(uid, st["cat"])
+            st["back"].append(st["current"])
+            st["current"] = fact
+
+        text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+
+        await bot.edit_message_text(
+            text,
+            c.message.chat.id,
+            st["msg_id"],
+            reply_markup=c.message.reply_markup
+        )
+
+    # PREV
+    elif c.data == "prev":
+        if st["back"]:
+            st["forward"].append(st["current"])
+            fact = st["back"].pop()
+            st["current"] = fact
+
+            text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+
+            await bot.edit_message_text(
+                text,
+                c.message.chat.id,
+                st["msg_id"],
+                reply_markup=c.message.reply_markup
+            )
+
     await c.answer()
 
 # ================= SAVE =================
