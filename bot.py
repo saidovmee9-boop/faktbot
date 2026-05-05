@@ -294,9 +294,7 @@ def generate_ai_fact():
 
 # ================= UNIQUE =================
 def get_unique_fact_user(uid, cat):
-    ...
-    return fact
-
+    return random.choice(FACTS[cat])
 
 # 👇 SHU YERGA QO‘SHASAN
 def get_unique_facts_group(gid, count=10):
@@ -510,30 +508,33 @@ async def save(c):
 
 
 # ================= GROUP ADD =================
-@dp.message_handler(content_types=types.ContentType.NEW_CHAT_MEMBERS)
-async def added(m: types.Message):
-    for u in m.new_chat_members:
-        if u.id == (await bot.me).id:
-            with db() as c:
-                c.execute("INSERT OR IGNORE INTO groups VALUES (?)", (m.chat.id,))
-            await m.answer("✅ Bot ishlayapti!")
+@dp.message_handler()
+async def any_msg(m: types.Message):
+    if m.chat.type in ["group", "supergroup"]:
+        with db() as c:
+            c.execute("INSERT OR IGNORE INTO groups VALUES (?)", (m.chat.id,))
 
 # ================= DAILY =================
 async def send_daily():
     with db() as c:
         groups = c.execute("SELECT gid FROM groups").fetchall()
 
+    print("GROUPS:", groups)
+
     for g in groups:
-        facts = get_unique_facts_group(g[0], 10)
+        gid = g[0]
+        print("YUBORYAPMAN:", gid)
+
+        facts = get_unique_facts_group(gid, 10)
 
         for f in facts:
             try:
                 await bot.send_message(
-                    g[0],
+                    gid,
                     f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
                 )
-            except:
-                pass
+            except Exception as e:
+                print("XATO:", e)
 
 # ================= WEB =================
 async def handle(r):
