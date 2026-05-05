@@ -10,7 +10,10 @@ from pytz import timezone
 import hashlib
 
 
-scheduler = AsyncIOScheduler(timezone=timezone("Asia/Tashkent"))
+scheduler = AsyncIOScheduler(
+    timezone=timezone("Asia/Tashkent"),
+    job_defaults={"coalesce": True, "max_instances": 1}
+)
 
 
 TOKEN = os.getenv("BOT_TOKEN")
@@ -578,22 +581,31 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
-    # 1) webhook muammosini yo‘qotadi (JUDAYAM MUHIM)
+    # 1) boshqa bot instance’larni to‘xtatadi
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # 2) scheduler faqat 1 marta ishlasin
-    if not scheduler.running:
-        scheduler.add_job(send_daily, "interval", minutes=1, id="daily_job", replace_existing=True)
-        scheduler.start()
+    # 2) scheduler faqat 1 marta
+    global scheduler
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
 
-    # 3) web serverni ishga tushiramiz
+    scheduler = AsyncIOScheduler(
+        timezone=timezone("Asia/Tashkent"),
+        job_defaults={"coalesce": True, "max_instances": 1}
+    )
+
+    scheduler.add_job(
+        send_daily,
+        "interval",
+        minutes=1,
+        id="daily_job",
+        replace_existing=True
+    )
+
+    scheduler.start()
+
+    # 3) web server
     asyncio.create_task(web_app())
-
-   
-
-
-
-    
     
 # ================= RUN =================
 if __name__ == "__main__":
