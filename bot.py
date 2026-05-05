@@ -350,8 +350,8 @@ async def show(uid, chat_id, new_fact=None, edit=False):
     if new_fact is None:
         new_fact = get_unique_fact_user(uid, cat)
 
-    # agar yangi fact kelsa stackga qo‘shamiz
-    if st["current"]:
+    # ❗ MUHIM FIX: faqat yangi fakt bo‘lsa backga qo‘sh
+    if st["current"] and new_fact != st["current"]:
         st["back"].append(st["current"])
 
     st["current"] = new_fact
@@ -519,22 +519,19 @@ async def send_daily():
     with db() as c:
         groups = c.execute("SELECT gid FROM groups").fetchall()
 
-    print("GROUPS:", groups)
-
     for g in groups:
         gid = g[0]
-        print("YUBORYAPMAN:", gid)
 
         facts = get_unique_facts_group(gid, 10)
 
+        text = ""
         for f in facts:
-            try:
-                await bot.send_message(
-                    gid,
-                    f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
-                )
-            except Exception as e:
-                print("XATO:", e)
+            text += f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}\n\n"
+
+        try:
+            await bot.send_message(gid, text)
+        except:
+            pass
 
 # ================= WEB =================
 async def handle(r):
