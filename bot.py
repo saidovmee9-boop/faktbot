@@ -294,36 +294,44 @@ def generate_ai_fact():
 
 # ================= UNIQUE =================
 def get_unique_fact_user(uid, cat):
+    ...
+    return fact
+
+
+# 👇 SHU YERGA QO‘SHASAN
+def get_unique_facts_group(gid, count=10):
     with db() as c:
         seen = set(r[0] for r in c.execute(
-            "SELECT fact FROM user_seen WHERE uid=?",
-            (uid,)
+            "SELECT fact FROM group_seen WHERE gid=?",
+            (gid,)
         ))
 
-    # faqat o‘z kategoriyasi
-    pool = FACTS[cat][:]
+    all_facts = []
+    for cat in FACTS.values():
+        all_facts.extend(cat)
 
-    random.shuffle(pool)
+    random.shuffle(all_facts)
 
-    for fact in pool:
+    result = []
+
+    for fact in all_facts:
         if fact[0] not in seen:
+            result.append(fact)
+
             with db() as c:
                 c.execute(
-                    "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
-                    (uid, fact[0])
+                    "INSERT OR IGNORE INTO group_seen VALUES (?,?)",
+                    (gid, fact[0])
                 )
-            return fact
 
-    # fallback (faqat shu category AI)
-    while True:
+            if len(result) >= count:
+                return result
+
+    while len(result) < count:
         fact = generate_ai_fact()
-        if fact[0] not in seen:
-            with db() as c:
-                c.execute(
-                    "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
-                    (uid, fact[0])
-                )
-            return fact
+        result.append(fact)
+
+    return result
 
 # ================= MENU =================
 def menu():
@@ -542,13 +550,10 @@ async def web_app():
 async def on_startup(dp):
     # har kuni 08:00 Tashkent vaqti
     scheduler.add_job(
-        send_daily,
-        trigger="cron",
-        hour=8,
-        minute=0,
-        id="daily_facts",
-        replace_existing=True
-    )
+    send_daily,
+    trigger="interval",
+    minutes=1
+)
 
     scheduler.start()
 
