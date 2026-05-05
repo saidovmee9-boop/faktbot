@@ -305,19 +305,53 @@ def get_unique_fact_user(uid, cat):
     with db() as c:
         for fact in facts:
             exists = c.execute(
-                "SELECT 1 FROM global_seen WHERE fact=?",
-                (fact[0],)
+                "SELECT 1 FROM user_seen WHERE uid=? AND fact=?",
+                (uid, fact[0])
             ).fetchone()
 
             if not exists:
                 c.execute(
-                    "INSERT OR IGNORE INTO global_seen VALUES (?)",
-                    (fact[0],)
+                    "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
+                    (uid, fact[0])
                 )
                 return fact
 
+    # agar hammasi tugasa random qaytaradi
     return random.choice(facts)
 
+def get_unique_facts_group(gid, count=10):
+    with db() as c:
+        seen = set(r[0] for r in c.execute(
+            "SELECT fact FROM group_seen WHERE gid=?",
+            (gid,)
+        ))
+
+    all_facts = []
+    for cat in FACTS.values():
+        all_facts.extend(cat)
+
+    random.shuffle(all_facts)
+
+    result = []
+
+    for fact in all_facts:
+        if fact[0] not in seen:
+            result.append(fact)
+
+            with db() as c:
+                c.execute(
+                    "INSERT OR IGNORE INTO group_seen VALUES (?,?)",
+                    (gid, fact[0])
+                )
+
+            if len(result) >= count:
+                return result
+
+    # agar fakt tugasa AI generatsiya
+    while len(result) < count:
+        result.append(generate_ai_fact())
+
+    return result
 # ================= MENU =================
 def menu():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -337,16 +371,10 @@ async def show(uid, chat_id, new_fact=None, edit=False):
     if new_fact is None:
         new_fact = get_unique_fact_user(uid, cat)
 
-    # ❗ MUHIM FIX: faqat yangi fakt bo‘lsa backga qo‘sh
     if st["current"] and new_fact != st["current"]:
         st["back"].append(st["current"])
 
     st["current"] = new_fact
-    with db() as c:
-        c.execute(
-            "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
-            (uid, new_fact[0])
-    )
     st["forward"].clear()
 
     text = f"🇺🇿 {new_fact[0]}\n🇷🇺 {new_fact[1]}\n🇬🇧 {new_fact[2]}"
@@ -442,7 +470,7 @@ async def nav(c):
     if not st:
         return await c.answer()
 
-    # NEXT
+    # ================= NEXT =================
     if c.data == "next":
         if st["forward"]:
             fact = st["forward"].pop()
@@ -453,6 +481,13 @@ async def nav(c):
             st["back"].append(st["current"])
             st["current"] = fact
 
+        # ✅ ko‘rilgan faktni saqlash
+        with db() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
+                (uid, fact[0])
+            )
+
         text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
 
         await bot.edit_message_text(
@@ -462,7 +497,7 @@ async def nav(c):
             reply_markup=c.message.reply_markup
         )
 
-    # PREV
+    # ================= PREV =================
     elif c.data == "prev":
         if st["back"]:
             st["forward"].append(st["current"])
@@ -516,14 +551,15 @@ async def send_daily():
 
         facts = get_unique_facts_group(gid, 10)
 
-        text = ""
         for f in facts:
-            text += f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}\n\n"
-
-        try:
-            await bot.send_message(gid, text)
-        except:
-            pass
+            try:
+                await bot.send_message(
+                    gid,
+                    f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
+                )
+                await asyncio.sleep(0.5)  # MUHIM
+            except:
+                pass
 # ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
