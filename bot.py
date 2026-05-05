@@ -57,6 +57,11 @@ def init_db():
             gid INTEGER PRIMARY KEY
         )
         """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS global_seen (
+            fact TEXT PRIMARY KEY
+        )
+        """)
 
 init_db()
 
@@ -294,42 +299,24 @@ def generate_ai_fact():
 
 # ================= UNIQUE =================
 def get_unique_fact_user(uid, cat):
-    return random.choice(FACTS[cat])
+    facts = FACTS[cat]
+    random.shuffle(facts)
 
-# 👇 SHU YERGA QO‘SHASAN
-def get_unique_facts_group(gid, count=10):
     with db() as c:
-        seen = set(r[0] for r in c.execute(
-            "SELECT fact FROM group_seen WHERE gid=?",
-            (gid,)
-        ))
+        for fact in facts:
+            exists = c.execute(
+                "SELECT 1 FROM global_seen WHERE fact=?",
+                (fact[0],)
+            ).fetchone()
 
-    all_facts = []
-    for cat in FACTS.values():
-        all_facts.extend(cat)
-
-    random.shuffle(all_facts)
-
-    result = []
-
-    for fact in all_facts:
-        if fact[0] not in seen:
-            result.append(fact)
-
-            with db() as c:
+            if not exists:
                 c.execute(
-                    "INSERT OR IGNORE INTO group_seen VALUES (?,?)",
-                    (gid, fact[0])
+                    "INSERT OR IGNORE INTO global_seen VALUES (?)",
+                    (fact[0],)
                 )
+                return fact
 
-            if len(result) >= count:
-                return result
-
-    while len(result) < count:
-        fact = generate_ai_fact()
-        result.append(fact)
-
-    return result
+    return random.choice(facts)
 
 # ================= MENU =================
 def menu():
@@ -355,6 +342,11 @@ async def show(uid, chat_id, new_fact=None, edit=False):
         st["back"].append(st["current"])
 
     st["current"] = new_fact
+    with db() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
+            (uid, new_fact[0])
+    )
     st["forward"].clear()
 
     text = f"🇺🇿 {new_fact[0]}\n🇷🇺 {new_fact[1]}\n🇬🇧 {new_fact[2]}"
@@ -532,7 +524,6 @@ async def send_daily():
             await bot.send_message(gid, text)
         except:
             pass
-
 # ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
