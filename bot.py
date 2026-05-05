@@ -578,21 +578,15 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
+    scheduler.add_job(send_daily, "interval", minutes=1)
     scheduler.start()
-    asyncio.create_task(web_app())
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-    scheduler = AsyncIOScheduler(timezone=timezone("Asia/Tashkent"))
+   
 
-    scheduler.add_job(
-        send_daily,
-        "interval",
-        minutes=1
-)
 
     scheduler.start()
 
-    asyncio.create_task(web_app())
+    
     
 # ================= RUN =================
 if __name__ == "__main__":
