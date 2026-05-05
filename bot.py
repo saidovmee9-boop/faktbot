@@ -578,8 +578,9 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
-    scheduler.add_job(send_daily, "interval", minutes=1)
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.add_job(send_daily, "interval", minutes=1)
+        scheduler.start()
 
    
 
