@@ -585,7 +585,6 @@ async def on_startup(dp):
    
 
 
-    scheduler.start()
 
     
     
