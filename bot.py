@@ -535,14 +535,19 @@ async def save(c):
 
 
 # ================= GROUP ADD =================
-@dp.message_handler()
+@dp.message_handler(content_types=types.ContentTypes.TEXT)
 async def any_msg(m: types.Message):
     if m.chat.type in ["group", "supergroup"]:
         with db() as c:
-            c.execute("INSERT OR IGNORE INTO groups VALUES (?)", (m.chat.id,))
+            c.execute(
+                "INSERT OR IGNORE INTO groups VALUES (?)",
+                (m.chat.id,)
+            )
 
 # ================= DAILY =================
 async def send_daily():
+    print("SEND DAILY CALLED")  # test uchun
+
     with db() as c:
         groups = c.execute("SELECT gid FROM groups").fetchall()
 
@@ -557,9 +562,9 @@ async def send_daily():
                     gid,
                     f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
                 )
-                await asyncio.sleep(0.5)  # MUHIM
-            except:
-                pass
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print("ERROR:", e)
 # ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
@@ -573,11 +578,16 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
-    # har kuni 08:00 Tashkent vaqti
+    scheduler.start()
+    asyncio.create_task(web_app())
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+    scheduler = AsyncIOScheduler(timezone=timezone("Asia/Tashkent"))
+
     scheduler.add_job(
-    send_daily,
-    trigger="interval",
-    minutes=1
+        send_daily,
+        "interval",
+        minutes=1
 )
 
     scheduler.start()
@@ -586,4 +596,8 @@ async def on_startup(dp):
     
 # ================= RUN =================
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup, on_shutdown=lambda dp: scheduler.shutdown())
+    executor.start_polling(
+        dp,
+        skip_updates=True,
+        on_startup=on_startup
+    )
