@@ -578,9 +578,16 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
+    # 1) webhook muammosini yo‘qotadi (JUDAYAM MUHIM)
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    # 2) scheduler faqat 1 marta ishlasin
     if not scheduler.running:
-        scheduler.add_job(send_daily, "interval", minutes=1)
+        scheduler.add_job(send_daily, "interval", minutes=1, id="daily_job", replace_existing=True)
         scheduler.start()
+
+    # 3) web serverni ishga tushiramiz
+    asyncio.create_task(web_app())
 
    
 
