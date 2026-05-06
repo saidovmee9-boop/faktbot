@@ -458,9 +458,23 @@ async def saved(m: types.Message):
     if not rows:
         return await m.answer("Hech narsa saqlanmagan")
 
-    text = "❤️ Saved facts:\n\n" + "\n\n".join(r[0] for r in rows)
+    result = []
 
-    await m.answer(text)
+    for r in rows:
+        parts = r[0].split("\n")
+
+        if len(parts) == 3:
+            text = (
+                f"🇺🇿 {parts[0]}\n"
+                f"🇷🇺 {parts[1]}\n"
+                f"🇬🇧 {parts[2]}"
+            )
+        else:
+            text = r[0]
+
+        result.append(text)
+
+    await m.answer("❤️ Saved facts:\n\n" + "\n\n".join(result))
 
 
 
