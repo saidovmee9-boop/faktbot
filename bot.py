@@ -382,20 +382,24 @@ async def show(uid, chat_id, new_fact=None, edit=False):
 
     text = f"🇺🇿 {new_fact[0]}\n🇷🇺 {new_fact[1]}\n🇬🇧 {new_fact[2]}"
 
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
-        InlineKeyboardButton("Next ➡️", callback_data="next")
+    # 🔥 FAQAT PRIVATE CHATDA BUTTON
+    # 🔥 FAQAT PRIVATE CHATDA BUTTON
+    kb = None
+    if chat_id > 0:   # private chat ID har doim > 0 bo‘ladi
+        kb = InlineKeyboardMarkup()
+        kb.row(
+            InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
+            InlineKeyboardButton("Next ➡️", callback_data="next")
     )
-    kb.add(InlineKeyboardButton("❤️ Save", callback_data="save"))
-
+        kb.add(
+            InlineKeyboardButton("❤️ Save", callback_data="save")
+    )
     if edit and st.get("msg_id"):
         await bot.edit_message_text(text, chat_id, st["msg_id"], reply_markup=kb)
         return
 
     msg = await bot.send_message(chat_id, text, reply_markup=kb)
     st["msg_id"] = msg.message_id
-
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
@@ -434,7 +438,6 @@ async def cat_handler(m):
     "msg_id": None,
     "current": None,
     "back": [],
-    "forward": []
 }
 
     await show(uid, m.chat.id)
@@ -481,41 +484,42 @@ async def stats(m: types.Message):
 
 
 # ================= NAV =================
-@dp.callback_query_handler(lambda c: c.data in ["next","prev"] and c.message.chat.type == "private")
-async def nav(c):
+@dp.callback_query_handler(lambda c: c.data in ["next", "prev", "save"])
+async def callback_router(c: types.CallbackQuery):
     uid = c.from_user.id
     st = state.get(uid)
 
     if not st:
         return await c.answer()
-    
-    # ================= BLOCK GROUP BUTTONS =================
-@dp.callback_query_handler(lambda c: c.message.chat.type != "private")
-async def block_group_buttons(c: types.CallbackQuery):
-    await c.answer()
 
+    # ========== SAVE ==========
+    if c.data == "save":
+        text = f"{st['current'][0]}\n{st['current'][1]}\n{st['current'][2]}"
 
-    # ================= NEXT =================
+        with db() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO saved VALUES (?,?)",
+                (uid, text)
+            )
+
+        return await c.answer("❤️ Saved")
+
+    # ========== NEXT ==========
     if c.data == "next":
-
-        # agar forwardda bor bo‘lsa
         if st["forward"]:
             fact = st["forward"].pop()
         else:
             fact = get_unique_fact_user(uid, st["cat"])
 
-        # faqat current bo‘lsa backga qo‘shamiz
         if st.get("current"):
             st["back"].append(st["current"])
 
         st["current"] = fact
-        st["forward"] = []   # ⚠️ MUHIM: yangi fact kelsa forward tozalanadi
 
-    # ================= PREV =================
+    # ========== PREV ==========
     elif c.data == "prev":
-
         if not st["back"]:
-            return await c.answer("Oldinga yo‘q")
+            return await c.answer("Yo‘q")
 
         fact = st["back"].pop()
 
@@ -534,26 +538,6 @@ async def block_group_buttons(c: types.CallbackQuery):
     )
 
     await c.answer()
-    
-
-# ================= SAVE =================
-@dp.callback_query_handler(lambda c: c.data == "save" and c.message.chat.type == "private")
-async def save(c):
-    try:
-        with db() as conn:
-            conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)",
-                         (c.from_user.id, c.message.text))
-
-            conn.execute("""
-                INSERT INTO stats(uid, count)
-                VALUES(?, 1)
-                ON CONFLICT(uid) DO UPDATE SET count = count + 1
-            """, (c.from_user.id,))
-
-        await c.answer("❤️ Saved")
-    except:
-        await c.answer("❗ Error")
-
 
 # ================= GROUP ADD =================
 @dp.message_handler(content_types=types.ContentTypes.TEXT)
