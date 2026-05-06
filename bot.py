@@ -408,8 +408,17 @@ async def start(m: types.Message):
 
     await m.answer("🚀 Ultimate Fact Bot ishga tushdi")
 
+
+
+# IGNORE GROUP 👇
+@dp.message_handler(lambda m: m.chat.type != "private")
+async def ignore_group(m: types.Message):
+    return
+
+
+
 # ================= CATEGORY =================
-@dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"])
+@dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"] and m.chat.type == "private")
 async def cat_handler(m):
     uid = m.from_user.id
 
@@ -432,7 +441,7 @@ async def cat_handler(m):
 
 
 
-@dp.message_handler(lambda m: m.text == "❤️ Saved")
+@dp.message_handler(lambda m: m.text == "❤️ Saved" and m.chat.type == "private")
 async def saved(m: types.Message):
     with db() as c:
         rows = c.execute(
@@ -449,7 +458,7 @@ async def saved(m: types.Message):
 
 
 
-@dp.message_handler(lambda m: m.text == "📊 Stats")
+@dp.message_handler(lambda m: m.text == "📊 Stats" and m.chat.type == "private")
 async def stats(m: types.Message):
     uid = m.from_user.id
 
@@ -472,7 +481,7 @@ async def stats(m: types.Message):
 
 
 # ================= NAV =================
-@dp.callback_query_handler(lambda c: c.data in ["next","prev"])
+@dp.callback_query_handler(lambda c: c.data in ["next","prev"] and c.message.chat.type == "private")
 async def nav(c):
     uid = c.from_user.id
     st = state.get(uid)
@@ -480,23 +489,17 @@ async def nav(c):
     if not st:
         return await c.answer()
 
-    # ================= NEXT =================
+     # ================= NEXT =================
     if c.data == "next":
         if st["forward"]:
             fact = st["forward"].pop()
             st["back"].append(st["current"])
-            st["current"] = fact
         else:
             fact = get_unique_fact_user(uid, st["cat"])
-            st["back"].append(st["current"])
-            st["current"] = fact
+            if st["current"]:
+                st["back"].append(st["current"])
 
-        # ✅ ko‘rilgan faktni saqlash
-        with db() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO user_seen VALUES (?,?)",
-                (uid, fact[0])
-            )
+        st["current"] = fact
 
         text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
 
@@ -509,24 +512,26 @@ async def nav(c):
 
     # ================= PREV =================
     elif c.data == "prev":
-        if st["back"]:
-            st["forward"].append(st["current"])
-            fact = st["back"].pop()
-            st["current"] = fact
+        if not st["back"]:
+            return await c.answer("Oldinga yo‘q")
 
-            text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+        fact = st["back"].pop()
+        st["forward"].append(st["current"])
+        st["current"] = fact
 
-            await bot.edit_message_text(
-                text,
-                c.message.chat.id,
-                st["msg_id"],
-                reply_markup=c.message.reply_markup
-            )
+        text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+
+        await bot.edit_message_text(
+            text,
+            c.message.chat.id,
+            st["msg_id"],
+            reply_markup=c.message.reply_markup
+        )
 
     await c.answer()
 
 # ================= SAVE =================
-@dp.callback_query_handler(lambda c: c.data == "save")
+@dp.callback_query_handler(lambda c: c.data == "save" and c.message.chat.type == "private")
 async def save(c):
     try:
         with db() as conn:
