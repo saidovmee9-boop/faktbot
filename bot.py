@@ -390,10 +390,10 @@ async def show(uid, chat_id, new_fact=None, edit=False):
         kb.row(
             InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
             InlineKeyboardButton("Next ➡️", callback_data="next")
-    )
+)
         kb.add(
             InlineKeyboardButton("❤️ Save", callback_data="save")
-    )
+)
     if edit and st.get("msg_id"):
         await bot.edit_message_text(text, chat_id, st["msg_id"], reply_markup=kb)
         return
@@ -422,26 +422,29 @@ async def ignore_group(m: types.Message):
 
 
 # ================= CATEGORY =================
-@dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"] and m.chat.type == "private")
-async def cat_handler(m):
+@dp.message_handler(
+    lambda m: m.text in ["🔬 Science", "💻 Tech", "📜 History"],
+    chat_type="private"
+)
+async def cat_handler(m: types.Message):
     uid = m.from_user.id
 
-    if "Science" in m.text:
+    if m.text == "🔬 Science":
         cat = "science"
-    elif "Tech" in m.text:
+    elif m.text == "💻 Tech":
         cat = "tech"
     else:
         cat = "history"
 
     state[uid] = {
-    "cat": cat,
-    "msg_id": None,
-    "current": None,
-    "back": [],
-}
+        "cat": cat,
+        "msg_id": None,
+        "current": None,
+        "back": [],
+        "forward": []
+    }
 
     await show(uid, m.chat.id)
-
 
 
 @dp.message_handler(lambda m: m.text == "❤️ Saved" and m.chat.type == "private")
@@ -540,7 +543,7 @@ async def callback_router(c: types.CallbackQuery):
     await c.answer()
 
 # ================= GROUP ADD =================
-@dp.message_handler(content_types=types.ContentTypes.TEXT)
+@dp.message_handler(content_types=types.ContentTypes.TEXT, chat_type=["group", "supergroup"])
 async def any_msg(m: types.Message):
     if m.chat.type in ["group", "supergroup"]:
         with db() as c:
