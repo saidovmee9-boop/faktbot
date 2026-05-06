@@ -399,7 +399,14 @@ async def show(uid, chat_id, new_fact=None, edit=False):
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
-    await m.answer("🚀 Ultimate Fact Bot", reply_markup=menu())
+    if m.chat.type in ["group", "supergroup"]:
+        with db() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO groups VALUES (?)",
+                (m.chat.id,)
+            )
+
+    await m.answer("🚀 Ultimate Fact Bot ishga tushdi")
 
 # ================= CATEGORY =================
 @dp.message_handler(lambda m: m.text in ["🔬 Science","💻 Tech","📜 History"])
@@ -595,12 +602,13 @@ async def on_startup(dp):
     )
 
     scheduler.add_job(
-        send_daily,
-        "interval",
-        minutes=1,
-        id="daily_job",
-        replace_existing=True
-    )
+    send_daily,
+    "cron",
+    hour=8,
+    minute=0,
+    id="daily_facts",
+    replace_existing=True
+)
 
     scheduler.start()
 
