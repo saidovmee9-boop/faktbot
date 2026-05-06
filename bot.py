@@ -488,47 +488,53 @@ async def nav(c):
 
     if not st:
         return await c.answer()
+    
+    # ================= BLOCK GROUP BUTTONS =================
+@dp.callback_query_handler(lambda c: c.message.chat.type != "private")
+async def block_group_buttons(c: types.CallbackQuery):
+    await c.answer()
 
-     # ================= NEXT =================
+
+    # ================= NEXT =================
     if c.data == "next":
+
+        # agar forwardda bor bo‘lsa
         if st["forward"]:
             fact = st["forward"].pop()
-            st["back"].append(st["current"])
         else:
             fact = get_unique_fact_user(uid, st["cat"])
-            if st["current"]:
-                st["back"].append(st["current"])
+
+        # faqat current bo‘lsa backga qo‘shamiz
+        if st.get("current"):
+            st["back"].append(st["current"])
 
         st["current"] = fact
-
-        text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
-
-        await bot.edit_message_text(
-            text,
-            c.message.chat.id,
-            st["msg_id"],
-            reply_markup=c.message.reply_markup
-        )
+        st["forward"] = []   # ⚠️ MUHIM: yangi fact kelsa forward tozalanadi
 
     # ================= PREV =================
     elif c.data == "prev":
+
         if not st["back"]:
             return await c.answer("Oldinga yo‘q")
 
         fact = st["back"].pop()
-        st["forward"].append(st["current"])
+
+        if st.get("current"):
+            st["forward"].append(st["current"])
+
         st["current"] = fact
 
-        text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+    text = f"🇺🇿 {st['current'][0]}\n🇷🇺 {st['current'][1]}\n🇬🇧 {st['current'][2]}"
 
-        await bot.edit_message_text(
-            text,
-            c.message.chat.id,
-            st["msg_id"],
-            reply_markup=c.message.reply_markup
-        )
+    await bot.edit_message_text(
+        text,
+        c.message.chat.id,
+        st["msg_id"],
+        reply_markup=c.message.reply_markup
+    )
 
     await c.answer()
+    
 
 # ================= SAVE =================
 @dp.callback_query_handler(lambda c: c.data == "save" and c.message.chat.type == "private")
@@ -576,10 +582,17 @@ async def send_daily():
                 await bot.send_message(
                     gid,
                     f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
-                )
+)
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print("ERROR:", e)
+                
+async def remove_buttons(chat_id, message_id):
+    await bot.edit_message_reply_markup(
+        chat_id,
+        message_id,
+        reply_markup=None
+    )                
 # ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
