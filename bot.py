@@ -323,13 +323,24 @@ def get_unique_fact_user(uid, cat):
     return random.choice(facts)
 
 def get_unique_facts_group(gid, count=10):
+
     with db() as c:
-        seen = set(r[0] for r in c.execute(
-            "SELECT fact FROM group_seen WHERE gid=?",
-            (gid,)
-        ))
+
+        group_seen = set(
+            r[0] for r in c.execute(
+                "SELECT fact FROM group_seen WHERE gid=?",
+                (gid,)
+            ).fetchall()
+        )
+
+        global_seen = set(
+            r[0] for r in c.execute(
+                "SELECT fact FROM global_seen"
+            ).fetchall()
+        )
 
     all_facts = []
+
     for cat in FACTS.values():
         all_facts.extend(cat)
 
@@ -338,7 +349,12 @@ def get_unique_facts_group(gid, count=10):
     result = []
 
     for fact in all_facts:
-        if fact[0] not in seen:
+
+        if (
+            fact[0] not in group_seen
+            and fact[0] not in global_seen
+        ):
+
             result.append(fact)
 
             with db() as c:
@@ -347,10 +363,14 @@ def get_unique_facts_group(gid, count=10):
                     (gid, fact[0])
                 )
 
-            if len(result) >= count:
-                return result
+                c.execute(
+                    "INSERT OR IGNORE INTO global_seen VALUES (?)",
+                    (fact[0],)
+                )
 
-    # agar fakt tugasa AI generatsiya
+            if len(result) >= count:
+                break
+
     while len(result) < count:
         result.append(generate_ai_fact())
 
@@ -414,10 +434,6 @@ async def start(m: types.Message):
 
 
 
-# IGNORE GROUP 👇
-@dp.message_handler(lambda m: m.chat.type != "private")
-async def ignore_group(m: types.Message):
-    return
 
 
 
@@ -568,32 +584,48 @@ async def any_msg(m: types.Message):
 
 # ================= DAILY =================
 async def send_daily():
-    print("SEND DAILY CALLED")  # test uchun
 
-    with db() as c:
-        groups = c.execute("SELECT gid FROM groups").fetchall()
+    print("DAILY STARTED")
 
-    for g in groups:
-        gid = g[0]
+    try:
 
-        facts = get_unique_facts_group(gid, 10)
+        # har kun global cache tozalanadi
+        with db() as c:
+            c.execute("DELETE FROM global_seen")
 
-        for f in facts:
+        with db() as c:
+            groups = c.execute(
+                "SELECT gid FROM groups"
+            ).fetchall()
+
+        print("GROUPS:", groups)
+
+        for g in groups:
+
+            gid = g[0]
+
             try:
-                await bot.send_message(
-                    gid,
-                    f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
-)
-                await asyncio.sleep(0.5)
+
+                facts = get_unique_facts_group(gid, 10)
+
+                text = "\n\n".join(
+                    [
+                        f"🇺🇿 {f[0]}\n🇷🇺 {f[1]}\n🇬🇧 {f[2]}"
+                        for f in facts
+                    ]
+                )
+
+                await bot.send_message(gid, text)
+
+                print(f"SENT TO {gid}")
+
+                await asyncio.sleep(1)
+
             except Exception as e:
-                print("ERROR:", e)
-                
-async def remove_buttons(chat_id, message_id):
-    await bot.edit_message_reply_markup(
-        chat_id,
-        message_id,
-        reply_markup=None
-    )                
+                print(f"GROUP ERROR {gid}: {e}")
+
+    except Exception as e:
+        print("DAILY ERROR:", e)
 # ================= WEB =================
 async def handle(r):
     return web.Response(text="OK")
@@ -622,16 +654,19 @@ async def on_startup(dp):
 
     scheduler.add_job(
     send_daily,
-    "cron",
-    hour=8,
-    minute=0,
+    trigger="cron",
+    minute="*/1",
+    timezone="Asia/Tashkent",
+    misfire_grace_time=3600,
     id="daily_facts",
     replace_existing=True
 )
 
     scheduler.start()
 
-    # 3) web server
+    asyncio.create_task(send_daily())
+
+
     asyncio.create_task(web_app())
     
 # ================= RUN =================
