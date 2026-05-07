@@ -387,39 +387,45 @@ def menu():
 state = {}
 
 # ================= SHOW =================
-async def show(uid, chat_id, new_fact=None, edit=False):
+async def show(uid, chat_id, new_fact=None):
+
     st = state[uid]
     cat = st["cat"]
 
     if new_fact is None:
         new_fact = get_unique_fact_user(uid, cat)
 
-    if st["current"] and new_fact != st["current"]:
-        st["back"].append(st["current"])
+    text = (
+        f"🇺🇿 {new_fact[0]}\n"
+        f"🇷🇺 {new_fact[1]}\n"
+        f"🇬🇧 {new_fact[2]}"
+    )
 
-    st["current"] = new_fact
-    st["forward"].clear()
+    kb = InlineKeyboardMarkup()
 
-    text = f"🇺🇿 {new_fact[0]}\n🇷🇺 {new_fact[1]}\n🇬🇧 {new_fact[2]}"
+    kb.row(
+        InlineKeyboardButton(
+            "⬅️ Prev",
+            callback_data=f"prev|{new_fact[0]}"
+        ),
+        InlineKeyboardButton(
+            "Next ➡️",
+            callback_data=f"next|{new_fact[0]}"
+        )
+    )
 
-    # 🔥 FAQAT PRIVATE CHATDA BUTTON
-    # 🔥 FAQAT PRIVATE CHATDA BUTTON
-    kb = None
-    if chat_id > 0:   # private chat ID har doim > 0 bo‘ladi
-        kb = InlineKeyboardMarkup()
-        kb.row(
-            InlineKeyboardButton("⬅️ Prev", callback_data="prev"),
-            InlineKeyboardButton("Next ➡️", callback_data="next")
-)
-        kb.add(
-            InlineKeyboardButton("❤️ Save", callback_data="save")
-)
-    if edit and st.get("msg_id"):
-        await bot.edit_message_text(text, chat_id, st["msg_id"], reply_markup=kb)
-        return
+    kb.add(
+        InlineKeyboardButton(
+            "❤️ Save",
+            callback_data=f"save|{new_fact[0]}"
+        )
+    )
 
-    msg = await bot.send_message(chat_id, text, reply_markup=kb)
-    st["msg_id"] = msg.message_id
+    await bot.send_message(
+        chat_id,
+        text,
+        reply_markup=kb
+    )
 # ================= START =================
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
@@ -517,57 +523,95 @@ async def stats(m: types.Message):
 
 
 # ================= NAV =================
-@dp.callback_query_handler(lambda c: c.data in ["next", "prev", "save"])
+@dp.callback_query_handler(
+    lambda c: c.data.startswith(("next|", "prev|", "save|"))
+)
 async def callback_router(c: types.CallbackQuery):
-    uid = c.from_user.id
-    st = state.get(uid)
 
-    if not st:
+    uid = c.from_user.id
+
+    if uid not in state:
         return await c.answer()
 
-    # ========== SAVE ==========
-    if c.data == "save":
-        text = f"{st['current'][0]}\n{st['current'][1]}\n{st['current'][2]}"
+    st = state[uid]
 
-        with db() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO saved VALUES (?,?)",
-                (uid, text)
+    action, current_fact = c.data.split("|", 1)
+
+    # ===== SAVE =====
+    if action == "save":
+
+        current = None
+
+        for cat in FACTS.values():
+            for fact in cat:
+                if fact[0] == current_fact:
+                    current = fact
+                    break
+
+        if current:
+
+            text = (
+                f"{current[0]}\n"
+                f"{current[1]}\n"
+                f"{current[2]}"
             )
+
+            with db() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO saved VALUES (?,?)",
+                    (uid, text)
+                )
 
         return await c.answer("❤️ Saved")
 
-    # ========== NEXT ==========
-    if c.data == "next":
-        if st["forward"]:
-            fact = st["forward"].pop()
-        else:
-            fact = get_unique_fact_user(uid, st["cat"])
+    # ===== NEXT =====
+    if action == "next":
 
-        if st.get("current"):
-            st["back"].append(st["current"])
+        fact = get_unique_fact_user(uid, st["cat"])
 
-        st["current"] = fact
+    # ===== PREV =====
+    else:
 
-    # ========== PREV ==========
-    elif c.data == "prev":
-        if not st["back"]:
-            return await c.answer("Yo‘q")
+        all_facts = []
 
-        fact = st["back"].pop()
+        for cat in FACTS.values():
+            all_facts.extend(cat)
 
-        if st.get("current"):
-            st["forward"].append(st["current"])
+        random.shuffle(all_facts)
 
-        st["current"] = fact
+        fact = random.choice(all_facts)
 
-    text = f"🇺🇿 {st['current'][0]}\n🇷🇺 {st['current'][1]}\n🇬🇧 {st['current'][2]}"
+    text = (
+        f"🇺🇿 {fact[0]}\n"
+        f"🇷🇺 {fact[1]}\n"
+        f"🇬🇧 {fact[2]}"
+    )
+
+    kb = InlineKeyboardMarkup()
+
+    kb.row(
+        InlineKeyboardButton(
+            "⬅️ Prev",
+            callback_data=f"prev|{fact[0]}"
+        ),
+        InlineKeyboardButton(
+            "Next ➡️",
+            callback_data=f"next|{fact[0]}"
+        )
+    )
+
+    kb.add(
+        InlineKeyboardButton(
+            "❤️ Save",
+            callback_data=f"save|{fact[0]}"
+        )
+    )
 
     await bot.edit_message_text(
         text,
         c.message.chat.id,
-        st["msg_id"],
-        reply_markup=c.message.reply_markup
+        c.message.message_id,
+        reply_markup=kb
     )
 
     await c.answer()
@@ -655,7 +699,8 @@ async def on_startup(dp):
     scheduler.add_job(
     send_daily,
     trigger="cron",
-    minute="*/1",
+    hour=8,
+    minute=0,
     timezone="Asia/Tashkent",
     misfire_grace_time=3600,
     id="daily_facts",
@@ -663,8 +708,6 @@ async def on_startup(dp):
 )
 
     scheduler.start()
-
-    asyncio.create_task(send_daily())
 
 
     asyncio.create_task(web_app())
