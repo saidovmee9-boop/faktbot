@@ -4,6 +4,7 @@ import asyncio
 import random
 from aiohttp import web
 from aiogram import Bot, Dispatcher, executor, types
+from aiogram.dispatcher.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
@@ -67,6 +68,10 @@ def init_db():
         """)
 
 init_db()
+
+def add_group(gid):
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO groups (gid) VALUES (?)", (gid,))
 
 # ================= FACTS =================
 FACTS = {
@@ -427,16 +432,14 @@ async def show(uid, chat_id, new_fact=None):
         reply_markup=kb
     )
 # ================= START =================
-@dp.message_handler(commands=["start"])
-async def start(m: types.Message):
-    if m.chat.type in ["group", "supergroup"]:
-        with db() as c:
-            c.execute(
-                "INSERT OR IGNORE INTO groups VALUES (?)",
-                (m.chat.id,)
-            )
-
-    await m.answer("🚀 Ultimate Fact Bot ishga tushdi")
+@dp.message_handler(Command("start")) # aiogram 2.x da message_handler ishlatiladi
+async def start_handler(message: types.Message):
+    # Guruh yoki superguruh ekanligini tekshiramiz
+    if message.chat.type in ['group', 'supergroup']:
+        add_group(message.chat.id) # Biz yaratgan funksiya
+        await message.answer("Guruh bazaga qo'shildi! ✅\nHar kuni 08:00 da 10 ta yangi fakt tashlayman.")
+    else:
+        await message.answer("Botga xush kelibsiz!")
 
 
 
