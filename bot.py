@@ -543,17 +543,15 @@ async def stats(m: types.Message):
 
 # ================= NAV =================
 
-@dp.callback_query_handler(
-    lambda c: c.data.startswith(("next|", "prev|", "save|"))
-)
+@dp.callback_query_handler(lambda c: c.data.startswith(("next|", "prev|", "save|")))
 async def callback_router(c: types.CallbackQuery):
     uid = c.from_user.id
     if uid not in state:
-        return await c.answer()
+        return await c.answer("Sessiya muddati tugagan. Qaytadan /start bosing.")
 
     st = state[uid]
     
-    # Тарих ва индексни иницилизация қилиш (агар йўқ бўлса)
+    # Tarixni tekshirish
     if "history" not in st:
         st["history"] = []
         st["index"] = -1
@@ -562,7 +560,7 @@ async def callback_router(c: types.CallbackQuery):
     action = data_parts[0]
     current_fact_text = data_parts[1] if len(data_parts) > 1 else ""
 
-    # ===== SAVE =====
+    # ===== SAVE QISMI (O'zgarishsiz qoldi) =====
     if action == "save":
         current = None
         for cat in FACTS.values():
@@ -573,40 +571,43 @@ async def callback_router(c: types.CallbackQuery):
         if current:
             text_to_save = f"{current[0]}\n{current[1]}\n{current[2]}"
             with db() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO saved VALUES (?,?)",
-                    (uid, text_to_save)
-                )
+                conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (uid, text_to_save))
         return await c.answer("❤️ Saved")
 
-    # ===== NEXT & PREV LOGIC =====
+    # ===== NEXT & PREV LOGIC (Xatolar tuzatildi) =====
+    fact = None # Dastlab bo'shatib olamiz
+
     if action == "next":
-        # Агар индекс тарихнинг охирида бўлса, янги факт оламиз
         if st["index"] >= len(st["history"]) - 1:
             fact = get_unique_fact_user(uid, st["cat"])
-            st["history"].append(fact)
-            st["index"] = len(st["history"]) - 1
+            if fact:
+                st["history"].append(fact)
+                st["index"] = len(st["history"]) - 1
+            else:
+                return await c.answer("Hozircha boshqa yangi fakt yo'q! 😊")
         else:
-            # Агар олдин орқага қайтган бўлсак, тарихдаги кейингисига ўтамиз
             st["index"] += 1
             fact = st["history"][st["index"]]
 
     elif action == "prev":
-        # Агар орқага қайта оладиган бўлсак
         if st["index"] > 0:
             st["index"] -= 1
             fact = st["history"][st["index"]]
         else:
             return await c.answer("Bu birinchi fakt! 🛑", show_alert=True)
 
-    # Хабар матнини тайёрлаш
+    # Agar biron sabab bilan fact topilmasa, to'xtatamiz
+    if not fact:
+        return await c.answer("Fakt yuklashda xatolik yuz berdi.")
+
+    # Xabar matni
     text = (
         f"🇺🇿 {fact[0]}\n"
         f"🇷🇺 {fact[1]}\n"
         f"🇬🇧 {fact[2]}"
     )
 
-    # Кнопкаларни яратиш
+    # Tugmalar (Har doim yangi fakt ID si bilan)
     kb = InlineKeyboardMarkup()
     kb.row(
         InlineKeyboardButton("⬅️ Prev", callback_data=f"prev|{fact[0]}"),
@@ -614,17 +615,20 @@ async def callback_router(c: types.CallbackQuery):
     )
     kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save|{fact[0]}"))
 
-    # Хабарни янгилаш
+    # Xabarni tahrirlash (Try-except bilan himoyalangan)
     try:
         await bot.edit_message_text(
-            text,
-            c.message.chat.id,
-            c.message.message_id,
+            text=text,
+            chat_id=c.message.chat.id,
+            message_id=c.message.message_id,
             reply_markup=kb
         )
-    except Exception:
-        # Агар текст ўзгармаган бўлса (масалан, охирги фактда туриб яна Next босилса)
-        pass
+    except Exception as e:
+        # Telegram bir xil xabarni edit qilsangiz xato beradi, shuni o'tkazib yuboramiz
+        if "message is not modified" in str(e).lower():
+            pass
+        else:
+            print(f"Render Error: {e}")
 
     await c.answer()
 
