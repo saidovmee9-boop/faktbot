@@ -435,11 +435,12 @@ async def show(uid, chat_id, direction=None):
 
     kb = InlineKeyboardMarkup()
     kb.row(
-        InlineKeyboardButton("⬅️ Prev", callback_data="prev_fact"),
-        InlineKeyboardButton("Next ➡️", callback_data="next_fact")
+        InlineKeyboardButton("⬅️ Prev", callback_data="prev_click"),
+        InlineKeyboardButton("Next ➡️", callback_data="next_click")
     )
-    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save|{fact[0]}"))
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data="save_click"))
 
+    # Xabarni yuborish
     await bot.send_message(chat_id, text, reply_markup=kb)
 # ================= START =================
 @dp.message_handler(commands=['start'], state='*')
@@ -543,92 +544,66 @@ async def stats(m: types.Message):
 
 # ================= NAV =================
 
-@dp.callback_query_handler(lambda c: c.data.startswith(("next|", "prev|", "save|")))
+@dp.callback_query_handler(lambda c: c.data in ["next_click", "prev_click", "save_click"])
 async def callback_router(c: types.CallbackQuery):
     uid = c.from_user.id
     if uid not in state:
-        return await c.answer("Sessiya muddati tugagan. Qaytadan /start bosing.")
+        return await c.answer("Sessiya muddati tugagan. /start bosing.")
 
     st = state[uid]
-    
-    # Tarixni tekshirish
-    if "history" not in st:
-        st["history"] = []
-        st["index"] = -1
+    action = c.data
 
-    data_parts = c.data.split("|", 1)
-    action = data_parts[0]
-    current_fact_text = data_parts[1] if len(data_parts) > 1 else ""
-
-    # ===== SAVE QISMI (O'zgarishsiz qoldi) =====
-    if action == "save":
-        current = None
-        for cat in FACTS.values():
-            for fact in cat:
-                if fact[0] == current_fact_text:
-                    current = fact
-                    break
-        if current:
-            text_to_save = f"{current[0]}\n{current[1]}\n{current[2]}"
+    # 1. SAVE LOGIKASI
+    if action == "save_click":
+        if st.get("index", -1) >= 0:
+            fact = st["history"][st["index"]]
+            text_to_save = f"{fact[0]}\n{fact[1]}\n{fact[2]}"
             with db() as conn:
                 conn.execute("INSERT OR IGNORE INTO saved VALUES (?,?)", (uid, text_to_save))
-        return await c.answer("❤️ Saved")
+            return await c.answer("❤️ Saqlandi!")
+        return await c.answer("Xatolik!")
 
-    # ===== NEXT & PREV LOGIC (Xatolar tuzatildi) =====
-    fact = None # Dastlab bo'shatib olamiz
-
-    if action == "next":
+    # 2. NEXT LOGIKASI
+    if action == "next_click":
         if st["index"] >= len(st["history"]) - 1:
             fact = get_unique_fact_user(uid, st["cat"])
             if fact:
                 st["history"].append(fact)
                 st["index"] = len(st["history"]) - 1
             else:
-                return await c.answer("Hozircha boshqa yangi fakt yo'q! 😊")
+                return await c.answer("Hozircha yangi faktlar tugadi! 😊")
         else:
             st["index"] += 1
             fact = st["history"][st["index"]]
 
-    elif action == "prev":
+    # 3. PREV LOGIKASI
+    elif action == "prev_click":
         if st["index"] > 0:
             st["index"] -= 1
             fact = st["history"][st["index"]]
         else:
-            return await c.answer("Bu birinchi fakt! 🛑", show_alert=True)
+            return await c.answer("Bu birinchi fakt! 🛑")
 
-    # Agar biron sabab bilan fact topilmasa, to'xtatamiz
-    if not fact:
-        return await c.answer("Fakt yuklashda xatolik yuz berdi.")
-
-    # Xabar matni
-    text = (
-        f"🇺🇿 {fact[0]}\n"
-        f"🇷🇺 {fact[1]}\n"
-        f"🇬🇧 {fact[2]}"
+    # 4. XABARNI TAHRIRLASH
+    text = f"🇺🇿 {fact[0]}\n🇷🇺 {fact[1]}\n🇬🇧 {fact[2]}"
+    
+    # Tugmalarni qayta yasaymiz (xuddi tepada yozganimizdek)
+    new_kb = InlineKeyboardMarkup()
+    new_kb.row(
+        InlineKeyboardButton("⬅️ Prev", callback_data="prev_click"),
+        InlineKeyboardButton("Next ➡️", callback_data="next_click")
     )
+    new_kb.add(InlineKeyboardButton("❤️ Save", callback_data="save_click"))
 
-    # Tugmalar (Har doim yangi fakt ID si bilan)
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton("⬅️ Prev", callback_data=f"prev|{fact[0]}"),
-        InlineKeyboardButton("Next ➡️", callback_data=f"next|{fact[0]}")
-    )
-    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save|{fact[0]}"))
-
-    # Xabarni tahrirlash (Try-except bilan himoyalangan)
     try:
         await bot.edit_message_text(
-            text=text,
-            chat_id=c.message.chat.id,
-            message_id=c.message.message_id,
-            reply_markup=kb
+            text, 
+            c.message.chat.id, 
+            c.message.message_id, 
+            reply_markup=new_kb
         )
-    except Exception as e:
-        # Telegram bir xil xabarni edit qilsangiz xato beradi, shuni o'tkazib yuboramiz
-        if "message is not modified" in str(e).lower():
-            pass
-        else:
-            print(f"Render Error: {e}")
+    except Exception:
+        pass
 
     await c.answer()
 
