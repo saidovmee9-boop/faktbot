@@ -692,10 +692,10 @@ async def web_app():
     await site.start()
 
 async def on_startup(dp):
-    # 1) boshqa bot instance’larni to‘xtatadi
+    # 1) Эски сессияларни ва навбатда турган хабарларни тозалаш
     await bot.delete_webhook(drop_pending_updates=True)
 
-    # 2) scheduler faqat 1 marta
+    # 2) Шедиулерни қайта созлаш (глобал ўзгарувчи билан)
     global scheduler
     if scheduler.running:
         scheduler.shutdown(wait=False) 
@@ -705,20 +705,23 @@ async def on_startup(dp):
         job_defaults={"coalesce": True, "max_instances": 1}
     )
 
+    # 3) Ҳар куни соат 08:00 да ишлайдиган вазифани қўшиш
     scheduler.add_job(
-    send_daily,
-    trigger="cron",
-    hour=8,
-    minute=0,
-    timezone="Asia/Tashkent",
-    misfire_grace_time=3600,
-    id="daily_facts",
-    replace_existing=True
-)
+        send_daily,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        timezone="Asia/Tashkent",
+        misfire_grace_time=3600,
+        id="daily_facts",
+        replace_existing=True
+    )
 
+    # 4) Шедиулерни ишга тушириш
     scheduler.start()
+    print("✅ Scheduler ishga tushdi: Har kuni 08:00 da faktlar yuboriladi.")
 
-
+    # 5) Веб-иловани (Render/Hosting учун) юритиш
     asyncio.create_task(web_app())
     
 # ================= RUN =================
