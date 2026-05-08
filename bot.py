@@ -8,6 +8,7 @@ from aiogram.dispatcher.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pytz import timezone
+from aiogram.dispatcher import FSMContext
 import hashlib
 
 
@@ -432,16 +433,20 @@ async def show(uid, chat_id, new_fact=None):
         reply_markup=kb
     )
 # ================= START =================
-@dp.message_handler(Command("start")) # aiogram 2.x da message_handler ishlatiladi
-async def start_handler(message: types.Message):
-    # Guruh yoki superguruh ekanligini tekshiramiz
+@dp.message_handler(commands=['start'], state='*')
+async def start_handler(message: types.Message, state: FSMContext):
+    # Фойдаланувчи қаерда қолиб кетган бўлса ҳам, ҳамма блокларни ечиб юборамиз
+    await state.finish()
+
     if message.chat.type in ['group', 'supergroup']:
-        add_group(message.chat.id) # Biz yaratgan funksiya
-        await message.answer("Guruh bazaga qo'shildi! ✅\nHar kuni 08:00 da 10 ta yangi fakt tashlayman.")
+        add_group(message.chat.id)
+        await message.answer("Guruh bazaga qo'shildi! ✅")
     else:
-        await message.answer("Botga xush kelibsiz!")
-
-
+        # Кнопкаларни юбориш (menu функцисини чақирган ҳолда)
+        await message.answer(
+            "Xush kelibsiz! Bo'limni tanlang:", 
+            reply_markup=menu() # Сиздаги тайёр функция
+        )
 
 
 
@@ -526,6 +531,7 @@ async def stats(m: types.Message):
 
 
 # ================= NAV =================
+
 @dp.callback_query_handler(
     lambda c: c.data.startswith(("next|", "prev|", "save|"))
 )
@@ -692,7 +698,7 @@ async def on_startup(dp):
     # 2) scheduler faqat 1 marta
     global scheduler
     if scheduler.running:
-        scheduler.shutdown(wait=False)
+        scheduler.shutdown(wait=False) 
 
     scheduler = AsyncIOScheduler(
         timezone=timezone("Asia/Tashkent"),
