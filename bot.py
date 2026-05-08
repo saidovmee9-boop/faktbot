@@ -393,45 +393,54 @@ def menu():
 state = {}
 
 # ================= SHOW =================
-async def show(uid, chat_id, new_fact=None):
-
+async def show(uid, chat_id, direction=None):
     st = state[uid]
     cat = st["cat"]
+    
+    # Тарих ва индексни тайёрлаш (агар ҳали йўқ бўлса)
+    if "history" not in st:
+        st["history"] = []
+        st["index"] = -1
 
-    if new_fact is None:
-        new_fact = get_unique_fact_user(uid, cat)
+    # МАНТИҚ: Олдинга, Орқага ёки Янги факт
+    if direction == "next":
+        if st["index"] < len(st["history"]) - 1:
+            # Агар олдин орқага қайтган бўлсак ва энди олдинга юрсак
+            st["index"] += 1
+            fact = st["history"][st["index"]]
+        else:
+            # Янги факт олиш ва тарихга қўшиш
+            fact = get_unique_fact_user(uid, cat)
+            st["history"].append(fact)
+            st["index"] = len(st["history"]) - 1
+            
+    elif direction == "prev":
+        if st["index"] > 0:
+            st["index"] -= 1
+            fact = st["history"][st["index"]]
+        else:
+            # Биринчи фактда турган бўлса, шуни ўзини қайтарамиз ёки хабар берамиз
+            fact = st["history"][0]
+    else:
+        # Биринчи марта бўлимга кирганда
+        fact = get_unique_fact_user(uid, cat)
+        st["history"] = [fact]
+        st["index"] = 0
 
     text = (
-        f"🇺🇿 {new_fact[0]}\n"
-        f"🇷🇺 {new_fact[1]}\n"
-        f"🇬🇧 {new_fact[2]}"
+        f"🇺🇿 {fact[0]}\n"
+        f"🇷🇺 {fact[1]}\n"
+        f"🇬🇧 {fact[2]}"
     )
 
     kb = InlineKeyboardMarkup()
-
     kb.row(
-        InlineKeyboardButton(
-            "⬅️ Prev",
-            callback_data=f"prev|{new_fact[0]}"
-        ),
-        InlineKeyboardButton(
-            "Next ➡️",
-            callback_data=f"next|{new_fact[0]}"
-        )
+        InlineKeyboardButton("⬅️ Prev", callback_data="prev_fact"),
+        InlineKeyboardButton("Next ➡️", callback_data="next_fact")
     )
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save|{fact[0]}"))
 
-    kb.add(
-        InlineKeyboardButton(
-            "❤️ Save",
-            callback_data=f"save|{new_fact[0]}"
-        )
-    )
-
-    await bot.send_message(
-        chat_id,
-        text,
-        reply_markup=kb
-    )
+    await bot.send_message(chat_id, text, reply_markup=kb)
 # ================= START =================
 @dp.message_handler(commands=['start'], state='*')
 async def start_handler(message: types.Message, state: FSMContext):
@@ -459,6 +468,7 @@ async def start_handler(message: types.Message, state: FSMContext):
 async def cat_handler(m: types.Message):
     uid = m.from_user.id
 
+    # Категорияни аниқлаш
     if m.text == "🔬 Science":
         cat = "science"
     elif m.text == "💻 Tech":
@@ -466,15 +476,16 @@ async def cat_handler(m: types.Message):
     else:
         cat = "history"
 
+    # Сизнинг state луғатингизни янги тизимга мослаймиз
     state[uid] = {
         "cat": cat,
         "msg_id": None,
-        "current": None,
-        "back": [],
-        "forward": []
+        "history": [],  # Бу ерда ҳамма кўрилган фактлар сақланади
+        "index": -1     # Ҳозирги турган ўрни
     }
 
-    await show(uid, m.chat.id)
+    # Биринчи фактни кўрсатиш учун 'next' йўналишини берамиз
+    await show(uid, m.chat.id, direction="next")
 
 
 @dp.message_handler(lambda m: m.text == "❤️ Saved" and m.chat.type == "private")
@@ -536,92 +547,84 @@ async def stats(m: types.Message):
     lambda c: c.data.startswith(("next|", "prev|", "save|"))
 )
 async def callback_router(c: types.CallbackQuery):
-
     uid = c.from_user.id
-
     if uid not in state:
         return await c.answer()
 
     st = state[uid]
+    
+    # Тарих ва индексни иницилизация қилиш (агар йўқ бўлса)
+    if "history" not in st:
+        st["history"] = []
+        st["index"] = -1
 
-    action, current_fact = c.data.split("|", 1)
+    data_parts = c.data.split("|", 1)
+    action = data_parts[0]
+    current_fact_text = data_parts[1] if len(data_parts) > 1 else ""
 
     # ===== SAVE =====
     if action == "save":
-
         current = None
-
         for cat in FACTS.values():
             for fact in cat:
-                if fact[0] == current_fact:
+                if fact[0] == current_fact_text:
                     current = fact
                     break
-
         if current:
-
-            text = (
-                f"{current[0]}\n"
-                f"{current[1]}\n"
-                f"{current[2]}"
-            )
-
+            text_to_save = f"{current[0]}\n{current[1]}\n{current[2]}"
             with db() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO saved VALUES (?,?)",
-                    (uid, text)
+                    (uid, text_to_save)
                 )
-
         return await c.answer("❤️ Saved")
 
-    # ===== NEXT =====
+    # ===== NEXT & PREV LOGIC =====
     if action == "next":
+        # Агар индекс тарихнинг охирида бўлса, янги факт оламиз
+        if st["index"] >= len(st["history"]) - 1:
+            fact = get_unique_fact_user(uid, st["cat"])
+            st["history"].append(fact)
+            st["index"] = len(st["history"]) - 1
+        else:
+            # Агар олдин орқага қайтган бўлсак, тарихдаги кейингисига ўтамиз
+            st["index"] += 1
+            fact = st["history"][st["index"]]
 
-        fact = get_unique_fact_user(uid, st["cat"])
+    elif action == "prev":
+        # Агар орқага қайта оладиган бўлсак
+        if st["index"] > 0:
+            st["index"] -= 1
+            fact = st["history"][st["index"]]
+        else:
+            return await c.answer("Bu birinchi fakt! 🛑", show_alert=True)
 
-    # ===== PREV =====
-    else:
-
-        all_facts = []
-
-        for cat in FACTS.values():
-            all_facts.extend(cat)
-
-        random.shuffle(all_facts)
-
-        fact = random.choice(all_facts)
-
+    # Хабар матнини тайёрлаш
     text = (
         f"🇺🇿 {fact[0]}\n"
         f"🇷🇺 {fact[1]}\n"
         f"🇬🇧 {fact[2]}"
     )
 
+    # Кнопкаларни яратиш
     kb = InlineKeyboardMarkup()
-
     kb.row(
-        InlineKeyboardButton(
-            "⬅️ Prev",
-            callback_data=f"prev|{fact[0]}"
-        ),
-        InlineKeyboardButton(
-            "Next ➡️",
-            callback_data=f"next|{fact[0]}"
-        )
+        InlineKeyboardButton("⬅️ Prev", callback_data=f"prev|{fact[0]}"),
+        InlineKeyboardButton("Next ➡️", callback_data=f"next|{fact[0]}")
     )
+    kb.add(InlineKeyboardButton("❤️ Save", callback_data=f"save|{fact[0]}"))
 
-    kb.add(
-        InlineKeyboardButton(
-            "❤️ Save",
-            callback_data=f"save|{fact[0]}"
+    # Хабарни янгилаш
+    try:
+        await bot.edit_message_text(
+            text,
+            c.message.chat.id,
+            c.message.message_id,
+            reply_markup=kb
         )
-    )
-
-    await bot.edit_message_text(
-        text,
-        c.message.chat.id,
-        c.message.message_id,
-        reply_markup=kb
-    )
+    except Exception:
+        # Агар текст ўзгармаган бўлса (масалан, охирги фактда туриб яна Next босилса)
+        pass
 
     await c.answer()
 
